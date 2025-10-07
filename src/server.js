@@ -249,7 +249,13 @@ function startAlertMonitor() {
   setInterval(scanAndInsertAlerts, 5000);
 }
 
+// 静态文件服务
 app.use(express.static(path.join(__dirname, '../public')));
+
+// 提醒页面路由
+app.get('/alerts', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/alerts.html'));
+});
 
 // 在静态服务与监听之前启动监控（或在 listen 之后皆可）
 startAlertMonitor();
