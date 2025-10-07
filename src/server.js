@@ -148,7 +148,90 @@ app.get('/api/test-db', async (req, res) => {
   }
 });
 
+// Alert monitoring configuration and functions
+const ALERT_THRESHOLD_PCT = Number(process.env.ALERT_THRESHOLD_PCT || 0.01);
+
+async function scanAndInsertAlerts() {
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
+    // 扫描当前分钟与上一分钟，聚合 O/H/L/C 并触发提醒
+    const sql = `
+      WITH params AS (
+        SELECT date_trunc('minute', now()) AS cur_bucket,
+               date_trunc('minute', now()) - INTERVAL '1 minute' AS prev_bucket,
+               CURRENT_DATE::text AS target_date
+      ),
+      minute_trades AS (
+        SELECT t.symbol,
+               CASE 
+                 WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN t.trade_time::timestamp
+                 ELSE (p.target_date || ' ' || t.trade_time)::timestamp
+               END AS ts,
+               t.price::numeric AS price,
+               CASE 
+                 WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', t.trade_time::timestamp)
+                 ELSE date_trunc('minute', (p.target_date || ' ' || t.trade_time)::timestamp)
+               END AS bucket
+        FROM tos_trades t
+        JOIN params p ON TRUE
+        WHERE t.price IS NOT NULL AND t.price::numeric > 0
+          AND (
+            CASE 
+              WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', t.trade_time::timestamp)
+              ELSE date_trunc('minute', (p.target_date || ' ' || t.trade_time)::timestamp)
+            END
+          ) IN ((SELECT cur_bucket FROM params), (SELECT prev_bucket FROM params))
+      ),
+      agg AS (
+        SELECT symbol, bucket,
+               MAX(price) AS high,
+               MIN(price) AS low
+        FROM minute_trades
+        GROUP BY symbol, bucket
+      ),
+      open_close AS (
+        SELECT a.symbol, a.bucket,
+               (SELECT mt.price FROM minute_trades mt WHERE mt.symbol = a.symbol AND mt.bucket = a.bucket ORDER BY mt.ts ASC LIMIT 1) AS open,
+               (SELECT mt.price FROM minute_trades mt WHERE mt.symbol = a.symbol AND mt.bucket = a.bucket ORDER BY mt.ts DESC LIMIT 1) AS close,
+               a.high, a.low
+        FROM agg a
+      ),
+      alerts AS (
+        SELECT symbol, bucket, open, high, low, close,
+               CASE WHEN open > 0 THEN (high - low) / open ELSE 0 END AS amplitude_pct,
+               CASE WHEN close > open THEN 1 WHEN close < open THEN -1 ELSE 0 END AS direction
+        FROM open_close
+        WHERE open IS NOT NULL AND high IS NOT NULL AND low IS NOT NULL AND close IS NOT NULL
+      )
+      INSERT INTO k_alerts(symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at)
+      SELECT symbol, bucket, open, high, low, close, amplitude_pct, direction, 'amplitude_1pct', now()
+      FROM alerts
+      WHERE amplitude_pct >= $1
+      ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
+      RETURNING symbol, bucket, amplitude_pct, direction;
+    `;
+
+    const { rows } = await pool.query(sql, [ALERT_THRESHOLD_PCT]);
+    if (rows.length > 0) {
+      console.log('Inserted alerts:', rows.length);
+    }
+  } catch (e) {
+    console.error('scanAndInsertAlerts error:', e.message);
+  }
+}
+
+function startAlertMonitor() {
+  // 先立即跑一次，然后每 5 秒跑一次
+  scanAndInsertAlerts();
+  setInterval(scanAndInsertAlerts, 5000);
+}
+
 app.use(express.static(path.join(__dirname, '../public')));
+
+// 在静态服务与监听之前启动监控（或在 listen 之后皆可）
+startAlertMonitor();
+console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
