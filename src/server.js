@@ -148,6 +148,28 @@ app.get('/api/test-db', async (req, res) => {
   }
 });
 
+// 提醒查询接口
+app.get('/api/alerts', async (req, res) => {
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    const since = req.query.since || null;
+    const limit = Math.min(Number(req.query.limit || 50), 200);
+
+    const sql = `
+      SELECT symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at
+      FROM k_alerts
+      WHERE ($1::timestamptz IS NULL OR created_at >= $1::timestamptz)
+      ORDER BY created_at DESC
+      LIMIT $2
+    `;
+    const { rows } = await pool.query(sql, [since, limit]);
+    res.json(rows);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
 // Alert monitoring configuration and functions
 const ALERT_THRESHOLD_PCT = Number(process.env.ALERT_THRESHOLD_PCT || 0.01);
 
