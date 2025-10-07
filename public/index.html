@@ -84,12 +84,6 @@
       <div id="status"></div>
     </div>
     <div id="chart"></div>
-    
-    <!-- 提醒列表区域 -->
-    <div id="alerts-panel" style="margin-top: 12px;">
-      <h3 style="color:#ddd;">提醒列表（最近）</h3>
-      <ul id="alerts-list" style="list-style:none;padding-left:0;color:#ddd;"></ul>
-    </div>
 
     <script>
       // 等待库加载完成
@@ -350,47 +344,6 @@
       
       // 启动图表初始化
       initChart();
-      
-      // 提醒列表相关功能
-      function formatBeijingTime(isoTs) {
-        const date = new Date(isoTs);
-        return date.toLocaleString('zh-CN', {
-          timeZone: 'Asia/Shanghai',
-          hour12: false,
-          year: 'numeric', month: '2-digit', day: '2-digit',
-          hour: '2-digit', minute: '2-digit'
-        });
-      }
-
-      function renderAlerts(rows) {
-        const list = document.getElementById('alerts-list');
-        list.innerHTML = rows.map(r => {
-          const dir = r.direction > 0 ? '↑' : (r.direction < 0 ? '↓' : '→');
-          const pct = (Number(r.amplitude_pct) * 100).toFixed(2);
-          const timeStr = formatBeijingTime(r.bucket);
-          return `<li style="padding:6px 0;border-bottom:1px solid #333;">
-            <strong>${r.symbol}</strong>
-            <span style="margin-left:8px;">${timeStr}</span>
-            <span style="margin-left:8px;">振幅 ${pct}% ${dir}</span>
-            <span style="margin-left:8px;">O:${r.open} C:${r.close}</span>
-          </li>`;
-        }).join('');
-      }
-
-      async function loadAlerts() {
-        try {
-          const res = await fetch('/api/alerts?limit=50');
-          if (!res.ok) throw new Error('HTTP ' + res.status);
-          const rows = await res.json();
-          if (Array.isArray(rows)) renderAlerts(rows);
-        } catch (e) {
-          console.error('loadAlerts error:', e);
-        }
-      }
-
-      // 初次加载与轮询
-      loadAlerts();
-      setInterval(loadAlerts, 10000);
     </script>
   </body>
 </html>
