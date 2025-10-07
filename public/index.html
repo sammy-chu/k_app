@@ -3,10 +3,274 @@
   <head>
     <meta charset="utf-8" />
     <title>K Chart MVP</title>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #1a1a1a;
+        color: #ddd;
+      }
+      #chart { 
+        width: 100%; 
+        height: 600px; 
+        margin-top: 20px;
+        border: 1px solid #333;
+        border-radius: 8px;
+      }
+      #toolbar { 
+        display: flex; 
+        gap: 12px; 
+        margin: 20px 0;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      #toolbar input, #toolbar button {
+        padding: 8px 12px;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background-color: #2a2a2a;
+        color: #ddd;
+        font-size: 14px;
+      }
+      #toolbar input:focus {
+        outline: none;
+        border-color: #007acc;
+      }
+      #toolbar button {
+        background-color: #007acc;
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+      #toolbar button:hover {
+        background-color: #005a9e;
+      }
+      #toolbar button:disabled {
+        background-color: #555;
+        cursor: not-allowed;
+      }
+      #status {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #888;
+      }
+      .error {
+        color: #ff6b6b;
+      }
+      .success {
+        color: #51cf66;
+      }
+      h1 {
+        margin: 0 0 20px 0;
+        color: #fff;
+      }
+    </style>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
   </head>
   <body>
-    <h1>K Chart MVP</h1>
-    <p>后续迭代将加载 /api/ohlcv 数据并绘图。</p>
+    <h1>K Chart MVP - 股票K线图</h1>
+    <div id="toolbar">
+      <input id="symbol" placeholder="输入symbol，如 AMD.BL" value="AMD.BL" />
+      <input id="date" type="date" />
+      <button id="load">加载数据</button>
+      <div id="status"></div>
+    </div>
+    <div id="chart"></div>
+
+    <script>
+      // 等待库加载完成
+      function initChart() {
+        if (typeof LightweightCharts === 'undefined') {
+          setTimeout(initChart, 100);
+          return;
+        }
+        
+        // 创建图表
+        const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+        layout: { 
+          background: { type: 'solid', color: '#1a1a1a' }, 
+          textColor: '#ddd' 
+        },
+        rightPriceScale: { 
+          borderVisible: false,
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.1,
+          },
+        },
+        timeScale: { 
+          borderVisible: false,
+          timeVisible: true,
+          secondsVisible: false,
+          // 添加自定义时间格式化器以显示本地时间
+          tickMarkFormatter: (time, tickMarkType, locale) => {
+            const date = new Date(time * 1000);
+            const options = { timeZone: 'Asia/Shanghai' };
+            
+            switch (tickMarkType) {
+              case 0: // Year
+                return date.toLocaleDateString('zh-CN', { ...options, year: 'numeric' });
+              case 1: // Month
+                return date.toLocaleDateString('zh-CN', { ...options, month: 'short' });
+              case 2: // Day
+                return date.toLocaleDateString('zh-CN', { ...options, day: 'numeric' });
+              case 3: // Time
+                return date.toLocaleTimeString('zh-CN', { 
+                  ...options, 
+                  hour12: false, 
+                  hour: '2-digit', 
+                  minute: '2-digit' 
+                });
+              case 4: // TimeWithSeconds
+                return date.toLocaleTimeString('zh-CN', { 
+                  ...options, 
+                  hour12: false, 
+                  hour: '2-digit', 
+                  minute: '2-digit', 
+                  second: '2-digit' 
+                });
+              default:
+                return date.toLocaleString('zh-CN', options);
+            }
+          }
+        },
+        grid: {
+          vertLines: {
+            color: '#333',
+          },
+          horzLines: {
+            color: '#333',
+          },
+        },
+        crosshair: {
+          mode: LightweightCharts.CrosshairMode.Normal,
+        },
+      });
+
+      // 添加蜡烛图系列
+        const series = chart.addSeries(LightweightCharts.CandlestickSeries, {
+          upColor: '#26a69a',
+          downColor: '#ef5350',
+          borderVisible: false,
+          wickUpColor: '#26a69a',
+          wickDownColor: '#ef5350',
+        });
+
+      // 状态显示函数
+      function showStatus(message, type = 'info') {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = message;
+        statusEl.className = type;
+      }
+
+      // 加载数据函数
+      async function loadData() {
+        const symbol = document.getElementById('symbol').value.trim();
+        const date = document.getElementById('date').value;
+        const loadBtn = document.getElementById('load');
+        
+        if (!symbol || !date) { 
+          showStatus('请输入symbol与date', 'error');
+          return; 
+        }
+
+        try {
+          loadBtn.disabled = true;
+          showStatus('正在加载数据...', 'info');
+          
+          const res = await fetch(`/api/ohlcv?symbol=${encodeURIComponent(symbol)}&date=${encodeURIComponent(date)}`);
+          
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          
+          const rows = await res.json();
+          
+          if (!Array.isArray(rows)) {
+            throw new Error('服务器返回的数据格式不正确');
+          }
+          
+          if (rows.length === 0) {
+            showStatus(`没有找到 ${symbol} 在 ${date} 的数据`, 'error');
+            series.setData([]);
+            return;
+          }
+
+          // 转换数据格式 - 修复时区问题
+          const candles = rows.map(r => {
+            // Lightweight Charts 不原生支持时区，需要手动调整时间戳
+            // 数据库中的时间是UTC时间，需要转换为本地时间显示
+            // 但是由于JavaScript的Date对象会自动处理时区，我们需要特殊处理
+            const utcDate = new Date(r.t);
+            // 获取UTC时间戳（秒）
+            const utcTimestamp = Math.floor(utcDate.getTime() / 1000);
+            // 对于Lightweight Charts，我们直接使用UTC时间戳，让浏览器处理显示
+            
+            return {
+              time: utcTimestamp,
+              open: Number(r.o),
+              high: Number(r.h),
+              low: Number(r.l),
+              close: Number(r.c)
+            };
+          }).filter(candle => 
+            !isNaN(candle.open) && !isNaN(candle.high) && 
+            !isNaN(candle.low) && !isNaN(candle.close)
+          );
+
+          if (candles.length === 0) {
+            showStatus('数据中没有有效的价格信息', 'error');
+            return;
+          }
+
+          // 设置数据到图表
+          series.setData(candles);
+          
+          // 自动调整视图
+          chart.timeScale().fitContent();
+          
+          showStatus(`成功加载 ${candles.length} 条K线数据`, 'success');
+          
+        } catch (error) {
+          console.error('加载数据失败:', error);
+          showStatus(`加载失败: ${error.message}`, 'error');
+        } finally {
+          loadBtn.disabled = false;
+        }
+      }
+
+      // 绑定事件
+      document.getElementById('load').addEventListener('click', loadData);
+      
+      // 回车键加载
+      document.getElementById('symbol').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') loadData();
+      });
+      document.getElementById('date').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') loadData();
+      });
+
+      // 设置默认日期为今天
+      document.getElementById('date').valueAsDate = new Date();
+
+      // 页面加载完成后自动加载默认数据
+      window.addEventListener('load', () => {
+        setTimeout(loadData, 500);
+      });
+
+      // 响应式处理
+      window.addEventListener('resize', () => {
+        chart.applyOptions({
+          width: document.getElementById('chart').clientWidth,
+        });
+      });
+      
+      } // 结束 initChart 函数
+      
+      // 启动图表初始化
+      initChart();
+    </script>
   </body>
 </html>
