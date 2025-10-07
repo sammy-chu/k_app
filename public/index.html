@@ -158,6 +158,49 @@
           wickDownColor: '#ef5350',
         });
 
+      // 轮询相关变量
+      let poller;
+      let isPolling = false;
+
+      // 启动轮询函数
+      function startPolling() {
+        if (poller) {
+          clearInterval(poller);
+        }
+        
+        isPolling = true;
+        console.log('开始轮询，每5秒更新一次数据');
+        
+        // 更新按钮文本和状态
+        const loadBtn = document.getElementById('load');
+        loadBtn.textContent = '停止轮询';
+        loadBtn.disabled = false;
+        
+        poller = setInterval(async () => {
+          try {
+            // 仅重新加载最后 N 分钟也可，MVP全量即可
+            await loadData();
+          } catch (error) {
+            console.error('轮询更新失败:', error);
+          }
+        }, 5000); // 每5秒轮询一次
+      }
+
+      // 停止轮询函数
+      function stopPolling() {
+        if (poller) {
+          clearInterval(poller);
+          poller = null;
+        }
+        isPolling = false;
+        console.log('停止轮询');
+        
+        // 更新按钮文本
+        const loadBtn = document.getElementById('load');
+        loadBtn.textContent = '加载数据';
+        loadBtn.disabled = false;
+      }
+
       // 状态显示函数
       function showStatus(message, type = 'info') {
         const statusEl = document.getElementById('status');
@@ -171,14 +214,17 @@
         const date = document.getElementById('date').value;
         const loadBtn = document.getElementById('load');
         
-        if (!symbol || !date) { 
-          showStatus('请输入symbol与date', 'error');
-          return; 
+        if (!symbol) {
+          showStatus('请输入股票代码', 'error');
+          return;
         }
 
         try {
-          loadBtn.disabled = true;
-          showStatus('正在加载数据...', 'info');
+          // 只有在非轮询状态下才禁用按钮和显示加载状态
+          if (!isPolling) {
+            loadBtn.disabled = true;
+            showStatus('正在加载数据...', 'info');
+          }
           
           const res = await fetch(`/api/ohlcv?symbol=${encodeURIComponent(symbol)}&date=${encodeURIComponent(date)}`);
           
@@ -233,16 +279,37 @@
           
           showStatus(`成功加载 ${candles.length} 条K线数据`, 'success');
           
+          // 如果不是轮询状态，则在首次加载成功后启动轮询
+          if (!isPolling) {
+            startPolling();
+          }
+          
         } catch (error) {
           console.error('加载数据失败:', error);
           showStatus(`加载失败: ${error.message}`, 'error');
         } finally {
-          loadBtn.disabled = false;
+          // 只有在非轮询状态下才重新启用按钮
+          if (!isPolling) {
+            loadBtn.disabled = false;
+          }
+        }
+      }
+
+      // 修改加载按钮事件：支持停止/启动轮询
+      function handleLoadClick() {
+        if (isPolling) {
+          // 如果正在轮询，则停止轮询
+          stopPolling();
+          document.getElementById('load').textContent = '加载数据';
+          document.getElementById('load').disabled = false;
+        } else {
+          // 如果没有轮询，则加载数据并启动轮询
+          loadData();
         }
       }
 
       // 绑定事件
-      document.getElementById('load').addEventListener('click', loadData);
+      document.getElementById('load').addEventListener('click', handleLoadClick);
       
       // 回车键加载
       document.getElementById('symbol').addEventListener('keypress', (e) => {
