@@ -179,55 +179,56 @@ async function scanAndInsertAlerts() {
 
     // 扫描当前分钟与上一分钟，聚合 O/H/L/C 并触发提醒
     const sql = `
+      /*
+       * 统一使用本地时区（Asia/Shanghai）的 timestamp 类型进行分钟聚合，
+       * 避免 timestamp 与 timestamptz 比较造成的分钟边界错位。
+       */
       WITH params AS (
-        SELECT date_trunc('minute', now()) AS cur_bucket,
-               date_trunc('minute', now()) - INTERVAL '1 minute' AS prev_bucket,
-               CURRENT_DATE::text AS target_date
+        SELECT 
+          date_trunc('minute', (now() AT TIME ZONE 'Asia/Shanghai')) AS cur_bucket_local,
+          date_trunc('minute', (now() AT TIME ZONE 'Asia/Shanghai')) - INTERVAL '1 minute' AS prev_bucket_local,
+          (now() AT TIME ZONE 'Asia/Shanghai')::date AS target_date
       ),
       minute_trades AS (
-        SELECT t.symbol,
-               CASE 
-                 WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN t.trade_time::timestamp
-                 ELSE (p.target_date || ' ' || t.trade_time)::timestamp
-               END AS ts,
-               t.price::numeric AS price,
-               CASE 
-                 WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', t.trade_time::timestamp)
-                 ELSE date_trunc('minute', (p.target_date || ' ' || t.trade_time)::timestamp)
-               END AS bucket
+        SELECT 
+          t.symbol,
+          /* 以 received_at 作为服务器收到时间并转换为上海时区的 timestamp */
+          (t.received_at AT TIME ZONE 'Asia/Shanghai') AS ts_local,
+          t.price::numeric AS price,
+          /* 本地时间按分钟截断，得到该笔成交归属的分钟桶 */
+          date_trunc('minute', (t.received_at AT TIME ZONE 'Asia/Shanghai')) AS bucket_local
         FROM tos_trades t
-        JOIN params p ON TRUE
         WHERE t.price IS NOT NULL AND t.price::numeric > 0
-          AND (
-            CASE 
-              WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', t.trade_time::timestamp)
-              ELSE date_trunc('minute', (p.target_date || ' ' || t.trade_time)::timestamp)
-            END
-          ) IN ((SELECT cur_bucket FROM params), (SELECT prev_bucket FROM params))
+          AND COALESCE(t.size::numeric, 0) > 0
+          /* 仅保留当前/上一分钟的成交（按本地分钟判断） */
+          AND date_trunc('minute', (t.received_at AT TIME ZONE 'Asia/Shanghai')) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params))
       ),
       agg AS (
-        SELECT symbol, bucket,
+        SELECT symbol, bucket_local AS bucket,
                MAX(price) AS high,
                MIN(price) AS low
         FROM minute_trades
-        GROUP BY symbol, bucket
+        GROUP BY symbol, bucket_local
       ),
       open_close AS (
         SELECT a.symbol, a.bucket,
-               (SELECT mt.price FROM minute_trades mt WHERE mt.symbol = a.symbol AND mt.bucket = a.bucket ORDER BY mt.ts ASC LIMIT 1) AS open,
-               (SELECT mt.price FROM minute_trades mt WHERE mt.symbol = a.symbol AND mt.bucket = a.bucket ORDER BY mt.ts DESC LIMIT 1) AS close,
+               (SELECT mt.price FROM minute_trades mt WHERE mt.symbol = a.symbol AND mt.bucket_local = a.bucket ORDER BY mt.ts_local ASC LIMIT 1) AS open,
+               (SELECT mt.price FROM minute_trades mt WHERE mt.symbol = a.symbol AND mt.bucket_local = a.bucket ORDER BY mt.ts_local DESC LIMIT 1) AS close,
                a.high, a.low
         FROM agg a
       ),
       alerts AS (
-        SELECT symbol, bucket, open, high, low, close,
+        SELECT symbol,
+               /* 插入时将本地分钟桶显式转换为 timestamptz（以 Asia/Shanghai 解释） */
+               (bucket AT TIME ZONE 'Asia/Shanghai') AS bucket_tz,
+               open, high, low, close,
                CASE WHEN open > 0 THEN (high - low) / open ELSE 0 END AS amplitude_pct,
                CASE WHEN close > open THEN 1 WHEN close < open THEN -1 ELSE 0 END AS direction
         FROM open_close
         WHERE open IS NOT NULL AND high IS NOT NULL AND low IS NOT NULL AND close IS NOT NULL
       )
       INSERT INTO k_alerts(symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at)
-      SELECT symbol, bucket, open, high, low, close, amplitude_pct, direction, 'amplitude_1pct', now()
+      SELECT symbol, bucket_tz, open, high, low, close, amplitude_pct, direction, 'amplitude_1pct', now()
       FROM alerts
       WHERE amplitude_pct >= $1
       ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
