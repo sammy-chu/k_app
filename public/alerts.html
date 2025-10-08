@@ -166,8 +166,9 @@
         // 格式化北京时间 - 简化格式
         function formatBeijingTime(isoString) {
             const date = new Date(isoString);
-            const beijingTime = new Date(date.getTime() + (8 * 60 * 60 * 1000));
-            return beijingTime.toLocaleString('zh-CN', {
+            // 直接使用北京时区格式化，不手动添加时区偏移
+            return date.toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
                 year: 'numeric',
                 month: '2-digit',
                 day: '2-digit',
