@@ -272,5 +272,5 @@ app.get('/alerts', (req, res) => {
 startAlertMonitor();
 console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8889;
 app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
