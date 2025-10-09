@@ -122,11 +122,10 @@
             color: #888;
         }
 
-        /* 振幅颜色 */
-        .amp-high { color: #ff4757; }
-        .amp-medium { color: #ffa502; }
-        .amp-low { color: #2ed573; }
-        .amp-minimal { color: #70a1ff; }
+        /* 振幅颜色 - 根据涨跌方向 */
+        .amp-up { color: #26a69a; }      /* 上涨绿色 */
+        .amp-down { color: #ef5350; }    /* 下跌红色 */
+        .amp-flat { color: #888; }       /* 平盘灰色 */
 
         /* 响应式设计 */
         @media (max-width: 768px) {
@@ -188,12 +187,19 @@
         }
 
         // 获取振幅CSS类
-        function getAmplitudeClass(amplitude) {
+        function getAmplitudeClass(amplitude, direction) {
             const amp = parseFloat(amplitude);
-            if (amp >= 5) return 'amp-high';
-            if (amp >= 3) return 'amp-medium';
-            if (amp >= 1) return 'amp-low';
-            return 'amp-minimal';
+            // 根据方向返回不同的颜色类
+            if (direction > 0) {
+                // 上涨时显示绿色
+                return 'amp-up';
+            } else if (direction < 0) {
+                // 下跌时显示红色
+                return 'amp-down';
+            } else {
+                // 平盘时显示灰色
+                return 'amp-flat';
+            }
         }
 
         // 渲染提醒列表 - 简洁单行格式
@@ -208,7 +214,7 @@
             alertsList.innerHTML = alerts.map(alert => {
                 const amplitude = (parseFloat(alert.amplitude_pct) * 100).toFixed(2);
                 const direction = getDirectionIndicator(alert.direction);
-                const amplitudeClass = getAmplitudeClass(amplitude);
+                const amplitudeClass = getAmplitudeClass(amplitude, alert.direction);
                 const time = formatBeijingTime(alert.created_at);
                 const open = parseFloat(alert.open).toFixed(4);
                 const close = parseFloat(alert.close).toFixed(4);
