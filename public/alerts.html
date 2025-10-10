@@ -57,6 +57,134 @@
             font-weight: normal;
         }
 
+        /* 配置面板样式 */
+        .config-panel {
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .config-header {
+            background-color: #333;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .config-header h3 {
+            margin: 0;
+            font-size: 1.1em;
+            color: #ddd;
+            font-weight: normal;
+        }
+
+        .toggle-btn {
+            background: none;
+            border: none;
+            color: #007acc;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px;
+            transition: transform 0.2s;
+        }
+
+        .toggle-btn:hover {
+            color: #0099ff;
+        }
+
+        .config-content {
+            padding: 16px;
+            display: block;
+        }
+
+        .config-content.collapsed {
+            display: none;
+        }
+
+        .config-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .config-row label {
+            color: #ddd;
+            min-width: 120px;
+        }
+
+        #volume-threshold {
+            background-color: #1a1a1a;
+            border: 1px solid #555;
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: #ddd;
+            font-size: 14px;
+            width: 120px;
+        }
+
+        #volume-threshold:focus {
+            outline: none;
+            border-color: #007acc;
+        }
+
+        .save-btn, .reset-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .save-btn {
+            background-color: #007acc;
+            color: white;
+        }
+
+        .save-btn:hover {
+            background-color: #0099ff;
+        }
+
+        .reset-btn {
+            background-color: #666;
+            color: white;
+        }
+
+        .reset-btn:hover {
+            background-color: #777;
+        }
+
+        .config-status {
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: #aaa;
+            flex-wrap: wrap;
+        }
+
+        #current-threshold {
+            color: #ddd;
+        }
+
+        #config-message {
+            color: #007acc;
+        }
+
+        #config-message.success {
+            color: #4caf50;
+        }
+
+        #config-message.error {
+            color: #f44336;
+        }
+
         .alerts-list {
             list-style: none;
             padding: 0;
@@ -156,6 +284,26 @@
             <h2 class="alerts-title">提醒列表（最近）</h2>
         </div>
 
+        <!-- 配置面板 -->
+        <div class="config-panel">
+            <div class="config-header">
+                <h3>成交量过滤配置</h3>
+                <button id="toggle-config" class="toggle-btn">▼</button>
+            </div>
+            <div id="config-content" class="config-content">
+                <div class="config-row">
+                    <label for="volume-threshold">最小当日成交量：</label>
+                    <input type="number" id="volume-threshold" min="0" step="1000" placeholder="5000">
+                    <button id="save-config" class="save-btn">保存</button>
+                    <button id="reset-config" class="reset-btn">重置</button>
+                </div>
+                <div class="config-status">
+                    <span id="current-threshold">当前阈值: 加载中...</span>
+                    <span id="config-message"></span>
+                </div>
+            </div>
+        </div>
+
         <ul class="alerts-list" id="alerts-list">
             <li class="loading">正在加载提醒数据...</li>
         </ul>
@@ -253,12 +401,154 @@
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Alerts page loaded');
             
+            // 初始化配置面板
+            initConfigPanel();
+            
             // 立即加载一次数据
             loadAlerts();
             
             // 每10秒自动刷新
             setInterval(loadAlerts, 10000);
         });
+
+        // 配置面板相关功能
+        function initConfigPanel() {
+            const toggleBtn = document.getElementById('toggle-config');
+            const configContent = document.getElementById('config-content');
+            const saveBtn = document.getElementById('save-config');
+            const resetBtn = document.getElementById('reset-config');
+            const volumeInput = document.getElementById('volume-threshold');
+            const currentThresholdSpan = document.getElementById('current-threshold');
+            const messageSpan = document.getElementById('config-message');
+
+            // 折叠/展开功能
+            toggleBtn.addEventListener('click', function() {
+                const isCollapsed = configContent.classList.contains('collapsed');
+                if (isCollapsed) {
+                    configContent.classList.remove('collapsed');
+                    toggleBtn.textContent = '▼';
+                } else {
+                    configContent.classList.add('collapsed');
+                    toggleBtn.textContent = '▶';
+                }
+            });
+
+            // 加载当前配置
+            loadCurrentConfig();
+
+            // 保存配置
+            saveBtn.addEventListener('click', async function() {
+                const threshold = parseInt(volumeInput.value);
+                if (isNaN(threshold) || threshold < 0) {
+                    showMessage('请输入有效的非负整数', 'error');
+                    return;
+                }
+
+                try {
+                    saveBtn.disabled = true;
+                    saveBtn.textContent = '保存中...';
+                    
+                    const response = await fetch('/api/config/volume-threshold', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ threshold: threshold })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    if (result.success) {
+                        showMessage(`配置已保存 (${result.previous} → ${result.current})`, 'success');
+                        updateCurrentThreshold(result.current);
+                        // 重新加载alerts数据以反映新的阈值
+                        loadAlerts();
+                    } else {
+                        throw new Error('保存失败');
+                    }
+                } catch (error) {
+                    console.error('Error saving config:', error);
+                    showMessage('保存失败，请稍后重试', 'error');
+                } finally {
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = '保存';
+                }
+            });
+
+            // 重置配置
+            resetBtn.addEventListener('click', async function() {
+                try {
+                    resetBtn.disabled = true;
+                    resetBtn.textContent = '重置中...';
+                    
+                    const response = await fetch('/api/config/volume-threshold', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ threshold: 5000 }) // 默认值
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    if (result.success) {
+                        volumeInput.value = result.current;
+                        showMessage(`已重置为默认值 (${result.previous} → ${result.current})`, 'success');
+                        updateCurrentThreshold(result.current);
+                        // 重新加载alerts数据以反映新的阈值
+                        loadAlerts();
+                    } else {
+                        throw new Error('重置失败');
+                    }
+                } catch (error) {
+                    console.error('Error resetting config:', error);
+                    showMessage('重置失败，请稍后重试', 'error');
+                } finally {
+                    resetBtn.disabled = false;
+                    resetBtn.textContent = '重置';
+                }
+            });
+
+            // 加载当前配置
+            async function loadCurrentConfig() {
+                try {
+                    const response = await fetch('/api/config/volume-threshold');
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const config = await response.json();
+                    volumeInput.value = config.current;
+                    updateCurrentThreshold(config.current);
+                } catch (error) {
+                    console.error('Error loading config:', error);
+                    currentThresholdSpan.textContent = '当前阈值: 加载失败';
+                }
+            }
+
+            // 更新当前阈值显示
+            function updateCurrentThreshold(threshold) {
+                currentThresholdSpan.textContent = `当前阈值: ${threshold.toLocaleString()}`;
+            }
+
+            // 显示消息
+            function showMessage(message, type = 'info') {
+                messageSpan.textContent = message;
+                messageSpan.className = type;
+                
+                // 3秒后清除消息
+                setTimeout(() => {
+                    messageSpan.textContent = '';
+                    messageSpan.className = '';
+                }, 3000);
+            }
+        }
     </script>
 </body>
 </html>

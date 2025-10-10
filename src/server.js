@@ -3,6 +3,9 @@ const path = require('path');
 const { Pool } = require('pg');
 const app = express();
 
+// 全局配置变量 - 成交量阈值
+let currentVolumeThreshold = Number(process.env.DAILY_VOLUME_MIN || 5000);
+
 // 数据库连接池配置
 const pool = new Pool({
   host: process.env.PGHOST || 'localhost',
@@ -155,8 +158,8 @@ app.get('/api/alerts', async (req, res) => {
     const since = req.query.since || null;
     const limit = Math.min(Number(req.query.limit || 50), 200);
     
-    // 读取阈值（默认5000）
-    const MIN_VOL = Number(process.env.DAILY_VOLUME_MIN ?? 5000);
+    // 读取阈值（使用动态配置）
+    const MIN_VOL = currentVolumeThreshold;
 
     const sql = `
       WITH today AS (
@@ -187,6 +190,52 @@ app.get('/api/alerts', async (req, res) => {
   } catch (e) {
     console.error('alerts query failed:', e);
     res.status(500).json({ error: 'alerts query failed' });
+  }
+});
+
+// 获取当前成交量阈值配置
+app.get('/api/config/volume-threshold', (req, res) => {
+  try {
+    res.json({
+      current: currentVolumeThreshold,
+      default: Number(process.env.DAILY_VOLUME_MIN || 5000),
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Get volume threshold config failed:', error);
+    res.status(500).json({ error: 'Failed to get configuration' });
+  }
+});
+
+// 设置成交量阈值配置
+app.post('/api/config/volume-threshold', express.json(), (req, res) => {
+  try {
+    const { threshold } = req.body;
+    
+    // 基本验证
+    if (typeof threshold !== 'number' || threshold < 0) {
+      return res.status(400).json({ 
+        error: 'Invalid threshold value. Must be a non-negative number.' 
+      });
+    }
+    
+    // 保存之前的值
+    const previousThreshold = currentVolumeThreshold;
+    
+    // 更新全局变量
+    currentVolumeThreshold = threshold;
+    
+    console.log(`Volume threshold updated: ${threshold}`);
+    
+    res.json({
+      success: true,
+      previous: previousThreshold,
+      current: threshold,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Set volume threshold config failed:', error);
+    res.status(500).json({ error: 'Failed to set configuration' });
   }
 });
 
