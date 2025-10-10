@@ -172,6 +172,7 @@ app.get('/api/alerts', async (req, res) => {
 
 // Alert monitoring configuration and functions
 const ALERT_THRESHOLD_PCT = Number(process.env.ALERT_THRESHOLD_PCT || 0.01);
+const DAILY_VOLUME_MIN = Number(process.env.DAILY_VOLUME_MIN || 5000);
 
 async function scanAndInsertAlerts() {
   try {
@@ -271,6 +272,7 @@ app.get('/alerts', (req, res) => {
 // 在静态服务与监听之前启动监控（或在 listen 之后皆可）
 startAlertMonitor();
 console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
+console.log(`[DAILY_VOLUME_MIN] configured threshold: ${DAILY_VOLUME_MIN}`);
 
 const PORT = process.env.PORT || 8889;
 app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
