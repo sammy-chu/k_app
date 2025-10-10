@@ -154,19 +154,39 @@ app.get('/api/alerts', async (req, res) => {
     await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
     const since = req.query.since || null;
     const limit = Math.min(Number(req.query.limit || 50), 200);
+    
+    // 读取阈值（默认5000）
+    const MIN_VOL = Number(process.env.DAILY_VOLUME_MIN ?? 5000);
 
     const sql = `
-      SELECT symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at
-      FROM k_alerts
-      WHERE ($1::timestamptz IS NULL OR created_at >= $1::timestamptz)
-      ORDER BY created_at DESC
-      LIMIT $2
+      WITH today AS (
+        SELECT
+          -- 以上海时区的当日开始/结束，转换为UTC以匹配库中时间列
+          (date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) AT TIME ZONE 'UTC') AS start_utc,
+          ((date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) + interval '1 day') AT TIME ZONE 'UTC') AS end_utc,
+          (now() AT TIME ZONE 'Asia/Shanghai')::date AS target_date
+      ), vol AS (
+        SELECT tr.symbol, SUM(tr.size) AS vol
+        FROM tos_trades tr, today t
+        WHERE tr.received_at >= t.start_utc AND tr.received_at < t.end_utc
+          AND COALESCE(tr.size::numeric, 0) > 0
+        GROUP BY tr.symbol
+      )
+      SELECT a.symbol, a.bucket, a.open, a.high, a.low, a.close, a.amplitude_pct, a.direction, a.rule_id, a.created_at
+      FROM k_alerts a
+      JOIN today t ON true
+      JOIN vol v ON v.symbol = a.symbol
+      WHERE ($1::timestamptz IS NULL OR a.created_at >= $1::timestamptz)
+        AND a.bucket >= t.start_utc
+        AND v.vol >= $2
+      ORDER BY a.created_at DESC
+      LIMIT $3
     `;
-    const { rows } = await pool.query(sql, [since, limit]);
+    const { rows } = await pool.query(sql, [since, MIN_VOL, limit]);
     res.json(rows);
   } catch (e) {
-    console.error(e);
-    res.status(500).json({ error: 'internal_error' });
+    console.error('alerts query failed:', e);
+    res.status(500).json({ error: 'alerts query failed' });
   }
 });
 
