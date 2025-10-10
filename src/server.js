@@ -175,10 +175,10 @@ app.get('/api/alerts', async (req, res) => {
       SELECT a.symbol, a.bucket, a.open, a.high, a.low, a.close, a.amplitude_pct, a.direction, a.rule_id, a.created_at
       FROM k_alerts a
       JOIN today t ON true
-      JOIN vol v ON v.symbol = a.symbol
+      LEFT JOIN vol v ON v.symbol = a.symbol
       WHERE ($1::timestamptz IS NULL OR a.created_at >= $1::timestamptz)
         AND a.bucket >= t.start_utc
-        AND v.vol >= $2
+        AND COALESCE(v.vol, 0) >= $2
       ORDER BY a.created_at DESC
       LIMIT $3
     `;
