@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  host: process.env.PGHOST || 'localhost',
+  host: process.env.PGHOST || '192.168.31.247',
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'ppro8_market_data',
   user: process.env.PGUSER || 'postgres',
@@ -19,7 +19,7 @@ async function checkSchema() {
       ORDER BY ordinal_position
     `);
     
-    console.log('tos_trades表结构:');
+    console.log('tos_trades表结�?');
     result.rows.forEach(row => {
       console.log(`${row.column_name}: ${row.data_type}`);
     });

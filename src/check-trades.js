@@ -1,7 +1,7 @@
 const { Pool } = require('pg');
 
 const pool = new Pool({
-  host: process.env.PGHOST || 'localhost',
+  host: process.env.PGHOST || '192.168.31.247',
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'ppro8_market_data',
   user: process.env.PGUSER || 'postgres',
@@ -18,8 +18,7 @@ async function checkTrades() {
     const recent = await pool.query('SELECT symbol, trade_time, price FROM tos_trades ORDER BY id DESC LIMIT 10');
     console.log('Recent trades:', recent.rows);
     
-    // 检查当前时间和最近一分钟的数据
-    const now = new Date();
+    // 检查当前时间和最近一分钟的数�?    const now = new Date();
     console.log('Current time:', now.toISOString());
     
     const currentMinute = await pool.query(`

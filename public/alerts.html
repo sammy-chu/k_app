@@ -304,6 +304,27 @@
             </div>
         </div>
 
+        <!-- 振幅筛选面板 -->
+        <div class="config-panel">
+            <div class="config-header">
+                <h3>振幅筛选配置</h3>
+                <button id="toggle-amplitude-config" class="toggle-btn">▼</button>
+            </div>
+            <div id="amplitude-config-content" class="config-content">
+                <div class="config-row">
+                    <label for="amplitude-threshold">最小振幅阈值：</label>
+                    <input type="number" id="amplitude-threshold" min="0" step="0.01" placeholder="0.01" value="0.01">
+                    <label for="enable-amplitude-filter">
+                        <input type="checkbox" id="enable-amplitude-filter" checked>
+                        启用振幅筛选
+                    </label>
+                </div>
+                <div class="config-status">
+                    <span id="amplitude-filter-status">筛选状态: 已启用，阈值 0.01</span>
+                </div>
+            </div>
+        </div>
+
         <ul class="alerts-list" id="alerts-list">
             <li class="loading">正在加载提醒数据...</li>
         </ul>
@@ -359,7 +380,15 @@
                 return;
             }
 
-            alertsList.innerHTML = alerts.map(alert => {
+            // 应用振幅筛选
+            const filteredAlerts = applyAmplitudeFilter(alerts);
+            
+            if (filteredAlerts.length === 0) {
+                alertsList.innerHTML = '<li class="no-alerts">没有符合筛选条件的提醒数据</li>';
+                return;
+            }
+
+            alertsList.innerHTML = filteredAlerts.map(alert => {
                 const amplitude = (parseFloat(alert.amplitude_pct) * 100).toFixed(2);
                 const direction = getDirectionIndicator(alert.direction);
                 const amplitudeClass = getAmplitudeClass(amplitude, alert.direction);
@@ -379,6 +408,48 @@
             }).join('');
         }
 
+        // 应用振幅筛选
+        function applyAmplitudeFilter(alerts) {
+            const enableFilter = document.getElementById('enable-amplitude-filter').checked;
+            
+            if (!enableFilter) {
+                return alerts;
+            }
+            
+            const thresholdInput = document.getElementById('amplitude-threshold');
+            let threshold = parseFloat(thresholdInput.value);
+            
+            // 边界值检查和健壮性处理
+            if (isNaN(threshold) || threshold < 0) {
+                console.warn('Invalid amplitude threshold, using default 0.01');
+                threshold = 0.01;
+                thresholdInput.value = 0.01;
+            }
+            
+            // 限制最大阈值为100%
+            if (threshold > 100) {
+                console.warn('Amplitude threshold too large, capping at 100%');
+                threshold = 100;
+                thresholdInput.value = 100;
+            }
+            
+            return alerts.filter(alert => {
+                const amplitude = parseFloat(alert.amplitude_pct);
+                
+                // 健壮性检查：处理无效的amplitude_pct值
+                if (isNaN(amplitude) || amplitude === null || amplitude === undefined) {
+                    console.warn('Invalid amplitude_pct for alert:', alert);
+                    return false;
+                }
+                
+                // 筛选绝对振幅大于等于阈值的记录
+                const absAmplitude = Math.abs(amplitude);
+                const thresholdDecimal = threshold / 100;
+                
+                return absAmplitude >= thresholdDecimal;
+            });
+        }
+
         // 加载提醒数据
         async function loadAlerts() {
             try {
@@ -389,6 +460,9 @@
                 const alerts = await response.json();
                 console.log('Loaded alerts:', alerts.length);
                 
+                // 缓存原始数据，避免重复请求
+                window.cachedAlerts = alerts;
+                
                 renderAlerts(alerts);
             } catch (error) {
                 console.error('Error loading alerts:', error);
@@ -397,9 +471,19 @@
             }
         }
 
+        // 重新渲染已缓存的数据（用于筛选条件变化时）
+        function reRenderAlerts() {
+            if (window.cachedAlerts) {
+                renderAlerts(window.cachedAlerts);
+            }
+        }
+
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', function() {
             console.log('Alerts page loaded');
+            
+            // 初始化振幅筛选配置
+            initAmplitudeFilter();
             
             // 初始化配置面板
             initConfigPanel();
@@ -410,6 +494,136 @@
             // 每10秒自动刷新
             setInterval(loadAlerts, 10000);
         });
+
+        // 初始化振幅筛选功能
+        function initAmplitudeFilter() {
+            const amplitudeThresholdInput = document.getElementById('amplitude-threshold');
+            const enableFilterCheckbox = document.getElementById('enable-amplitude-filter');
+            const filterStatusSpan = document.getElementById('amplitude-filter-status');
+            const toggleBtn = document.getElementById('toggle-amplitude-config');
+            const configContent = document.getElementById('amplitude-config-content');
+
+            // 从URL参数和localStorage加载配置
+            loadAmplitudeFilterConfig();
+
+            // 折叠/展开功能
+            toggleBtn.addEventListener('click', function() {
+                const isCollapsed = configContent.classList.contains('collapsed');
+                if (isCollapsed) {
+                    configContent.classList.remove('collapsed');
+                    toggleBtn.textContent = '▼';
+                } else {
+                    configContent.classList.add('collapsed');
+                    toggleBtn.textContent = '▶';
+                }
+            });
+
+            // 监听阈值输入变化
+            amplitudeThresholdInput.addEventListener('input', function() {
+                saveAmplitudeFilterConfig();
+                updateFilterStatus();
+                // 重新渲染已缓存的数据，避免重复请求
+                reRenderAlerts();
+            });
+
+            // 监听启用/禁用筛选变化
+            enableFilterCheckbox.addEventListener('change', function() {
+                saveAmplitudeFilterConfig();
+                updateFilterStatus();
+                // 重新渲染已缓存的数据，避免重复请求
+                reRenderAlerts();
+            });
+
+            // 更新筛选状态显示
+            function updateFilterStatus() {
+                const enabled = enableFilterCheckbox.checked;
+                const threshold = parseFloat(amplitudeThresholdInput.value) || 0.01;
+                
+                if (enabled) {
+                    filterStatusSpan.textContent = `筛选状态: 已启用，阈值 ${threshold}`;
+            } else {
+                filterStatusSpan.textContent = '筛选状态: 已禁用';
+            }
+            }
+
+            // 从URL参数和localStorage加载配置
+            function loadAmplitudeFilterConfig() {
+                // 从URL参数读取
+                const urlParams = new URLSearchParams(window.location.search);
+                const ampMinParam = urlParams.get('amp_min');
+                
+                // 从localStorage读取
+                const savedConfig = localStorage.getItem('amplitudeFilterConfig');
+                let config = { threshold: 0.01, enabled: true };
+                
+                if (savedConfig) {
+                    try {
+                        config = JSON.parse(savedConfig);
+                        // 验证配置数据的有效性
+                        if (typeof config.threshold !== 'number' || config.threshold < 0 || config.threshold > 100) {
+                            console.warn('Invalid saved threshold, using default');
+                            config.threshold = 0.01;
+                        }
+                        if (typeof config.enabled !== 'boolean') {
+                            console.warn('Invalid saved enabled state, using default');
+                            config.enabled = true;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse saved amplitude filter config:', e);
+                        config = { threshold: 0.01, enabled: true };
+                    }
+                }
+                
+                // URL参数优先级更高，但需要验证
+                if (ampMinParam !== null) {
+                    const threshold = parseFloat(ampMinParam);
+                    if (!isNaN(threshold) && threshold >= 0 && threshold <= 100) {
+                        config.threshold = threshold;
+                        config.enabled = true;
+                    } else {
+                        console.warn('Invalid URL parameter amp_min:', ampMinParam);
+                    }
+                }
+                
+                // 应用配置
+                amplitudeThresholdInput.value = config.threshold;
+                enableFilterCheckbox.checked = config.enabled;
+                updateFilterStatus();
+            }
+
+            // 保存配置到localStorage和URL
+            function saveAmplitudeFilterConfig() {
+                const threshold = parseFloat(amplitudeThresholdInput.value);
+                const enabled = enableFilterCheckbox.checked;
+                
+                // 验证阈值有效性
+                if (isNaN(threshold) || threshold < 0 || threshold > 100) {
+                    console.warn('Cannot save invalid threshold:', threshold);
+                    return;
+                }
+                
+                const config = { threshold, enabled };
+                
+                // 保存到localStorage
+                try {
+                    localStorage.setItem('amplitudeFilterConfig', JSON.stringify(config));
+                } catch (e) {
+                    console.error('Failed to save amplitude filter config to localStorage:', e);
+                }
+                
+                // 更新URL参数（不刷新页面）
+                const url = new URL(window.location);
+                if (enabled && threshold > 0) {
+                    url.searchParams.set('amp_min', threshold.toString());
+                } else {
+                    url.searchParams.delete('amp_min');
+                }
+                window.history.replaceState({}, '', url);
+            }
+
+            // 初始更新状态
+            updateFilterStatus();
+        }
 
         // 配置面板相关功能
         function initConfigPanel() {

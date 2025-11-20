@@ -3,12 +3,12 @@ const path = require('path');
 const { Pool } = require('pg');
 const app = express();
 
-// 全局配置变量 - 成交量阈值
+// 全局配置变量 - 成交量阈�?
 let currentVolumeThreshold = Number(process.env.DAILY_VOLUME_MIN || 5000);
 
 // 数据库连接池配置
 const pool = new Pool({
-  host: process.env.PGHOST || 'localhost',
+  host: process.env.PGHOST || '192.168.31.247',
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'ppro8_market_data',
   user: process.env.PGUSER || 'postgres',
@@ -112,12 +112,12 @@ app.get('/api/ohlcv', async (req, res) => {
   }
 });
 
-// 数据库测试路由
+// 数据库测试路�?
 app.get('/api/test-db', async (req, res) => {
   try {
     await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
     
-    // 测试表是否存在
+    // 测试表是否存�?
     const tableCheck = await pool.query(`
       SELECT table_name 
       FROM information_schema.tables 
@@ -128,7 +128,7 @@ app.get('/api/test-db', async (req, res) => {
       return res.json({ error: 'tos_trades table not found', schema: process.env.PGSCHEMA || 'market_data' });
     }
     
-    // 获取表结构
+    // 获取表结�?
     const columns = await pool.query(`
       SELECT column_name, data_type 
       FROM information_schema.columns 
@@ -164,7 +164,7 @@ app.get('/api/alerts', async (req, res) => {
     const sql = `
       WITH today AS (
         SELECT
-          -- 以上海时区的当日开始/结束，转换为UTC以匹配库中时间列
+          -- 以上海时区的当日开�?结束，转换为UTC以匹配库中时间列
           (date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) AT TIME ZONE 'UTC') AS start_utc,
           ((date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) + interval '1 day') AT TIME ZONE 'UTC') AS end_utc,
           (now() AT TIME ZONE 'Asia/Shanghai')::date AS target_date
@@ -193,7 +193,7 @@ app.get('/api/alerts', async (req, res) => {
   }
 });
 
-// 获取当前成交量阈值配置
+// 获取当前成交量阈值配�?
 app.get('/api/config/volume-threshold', (req, res) => {
   try {
     res.json({
@@ -207,7 +207,7 @@ app.get('/api/config/volume-threshold', (req, res) => {
   }
 });
 
-// 设置成交量阈值配置
+// 设置成交量阈值配�?
 app.post('/api/config/volume-threshold', express.json(), (req, res) => {
   try {
     const { threshold } = req.body;
@@ -219,7 +219,7 @@ app.post('/api/config/volume-threshold', express.json(), (req, res) => {
       });
     }
     
-    // 保存之前的值
+    // 保存之前的�?
     const previousThreshold = currentVolumeThreshold;
     
     // 更新全局变量
@@ -247,11 +247,11 @@ async function scanAndInsertAlerts() {
   try {
     await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
 
-    // 扫描当前分钟与上一分钟，聚合 O/H/L/C 并触发提醒
+    // 扫描当前分钟与上一分钟，聚�?O/H/L/C 并触发提�?
     const sql = `
       /*
-       * 统一使用本地时区（Asia/Shanghai）的 timestamp 类型进行分钟聚合，
-       * 避免 timestamp 与 timestamptz 比较造成的分钟边界错位。
+       * 统一使用本地时区（Asia/Shanghai）的 timestamp 类型进行分钟聚合�?
+       * 避免 timestamp �?timestamptz 比较造成的分钟边界错位�?
        */
       WITH params AS (
         SELECT 
@@ -262,7 +262,7 @@ async function scanAndInsertAlerts() {
       minute_trades AS (
         SELECT 
           t.symbol,
-          /* 以 received_at 作为服务器收到时间并转换为上海时区的 timestamp */
+          /* �?received_at 作为服务器收到时间并转换为上海时区的 timestamp */
           (t.received_at AT TIME ZONE 'Asia/Shanghai') AS ts_local,
           t.price::numeric AS price,
           /* 本地时间按分钟截断，得到该笔成交归属的分钟桶 */
@@ -270,7 +270,7 @@ async function scanAndInsertAlerts() {
         FROM tos_trades t
         WHERE t.price IS NOT NULL AND t.price::numeric > 0
           AND COALESCE(t.size::numeric, 0) > 0
-          /* 使用 received_at 作为数据接收时间进行筛选 */
+          /* 使用 received_at 作为数据接收时间进行筛�?*/
           AND date_trunc('minute', (t.received_at AT TIME ZONE 'Asia/Shanghai')) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params))
           /* 使用 trade_time 作为实际交易时间进行验证 - 确保交易时间在合理范围内 */
           AND (
@@ -278,7 +278,7 @@ async function scanAndInsertAlerts() {
             (t.trade_time ~ '^\d{4}-\d{2}-\d{2}' AND 
              date_trunc('minute', t.trade_time::timestamp) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params)))
             OR
-            /* 如果 trade_time 只包含时间部分，则与当前日期组合后验证 */
+            /* 如果 trade_time 只包含时间部分，则与当前日期组合后验�?*/
             (t.trade_time !~ '^\d{4}-\d{2}-\d{2}' AND 
              date_trunc('minute', ((SELECT target_date FROM params) || ' ' || t.trade_time)::timestamp) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params)))
           )
@@ -299,7 +299,7 @@ async function scanAndInsertAlerts() {
       ),
       alerts AS (
         SELECT symbol,
-               /* 插入时将本地分钟桶显式转换为 timestamptz（以 Asia/Shanghai 解释） */
+               /* 插入时将本地分钟桶显式转换为 timestamptz（以 Asia/Shanghai 解释�?*/
                (bucket AT TIME ZONE 'Asia/Shanghai') AS bucket_tz,
                open, high, low, close,
                CASE WHEN open > 0 THEN (high - low) / open ELSE 0 END AS amplitude_pct,
@@ -325,12 +325,12 @@ async function scanAndInsertAlerts() {
 }
 
 function startAlertMonitor() {
-  // 先立即跑一次，然后每 5 秒跑一次
+  // 先立即跑一次，然后�?5 秒跑一�?
   scanAndInsertAlerts();
   setInterval(scanAndInsertAlerts, 5000);
 }
 
-// 静态文件服务
+// 静态文件服�?
 app.use(express.static(path.join(__dirname, '../public')));
 
 // 提醒页面路由
@@ -338,10 +338,11 @@ app.get('/alerts', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/alerts.html'));
 });
 
-// 在静态服务与监听之前启动监控（或在 listen 之后皆可）
+// 在静态服务与监听之前启动监控（或�?listen 之后皆可�?
 startAlertMonitor();
 console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
 console.log(`[DAILY_VOLUME_MIN] configured threshold: ${DAILY_VOLUME_MIN}`);
 
 const PORT = process.env.PORT || 8889;
-app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
+const HOST = process.env.HOST || '0.0.0.0';
+app.listen(PORT, HOST, () => console.log(`Server listening on http://${HOST}:${PORT}`));

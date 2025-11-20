@@ -6,7 +6,7 @@ const { Pool } = require('pg');
   const hm = process.argv[4] || '10:34'; // HH:MM without seconds
 
   const pool = new Pool({
-    host: process.env.PGHOST || 'localhost',
+    host: process.env.PGHOST || '192.168.31.247',
     port: Number(process.env.PGPORT || 5432),
     database: process.env.PGDATABASE || 'ppro8_market_data',
     user: process.env.PGUSER || 'postgres',
