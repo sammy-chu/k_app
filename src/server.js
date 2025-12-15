@@ -36,20 +36,20 @@ app.get('/api/ohlcv', async (req, res) => {
       filtered AS (
         SELECT t.symbol, 
                CASE 
-                 WHEN t.trade_time ~ '^\d{4}-\d{2}-\d{2}' THEN t.trade_time::timestamp
-                 ELSE (p.target_date || ' ' || t.trade_time)::timestamp
+                 WHEN trim(t.trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN trim(t.trade_time)::timestamp
+                 ELSE (p.target_date || ' ' || trim(t.trade_time))::timestamp
                END AS ts,
                t.price::numeric AS price, 
                t.size,
                CASE 
-                 WHEN t.trade_time ~ '^\d{4}-\d{2}-\d{2}' THEN date_trunc('minute', t.trade_time::timestamp)
-                 ELSE date_trunc('minute', (p.target_date || ' ' || t.trade_time)::timestamp)
+                 WHEN trim(t.trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', trim(t.trade_time)::timestamp)
+                 ELSE date_trunc('minute', (p.target_date || ' ' || trim(t.trade_time))::timestamp)
                END AS bucket
         FROM tos_trades t
         JOIN params p ON p.symbol = t.symbol
         WHERE (
-          (t.trade_time ~ '^\d{4}-\d{2}-\d{2}' AND LEFT(t.trade_time, 10) = p.target_date) OR
-          (t.trade_time !~ '^\d{4}-\d{2}-\d{2}' AND DATE(t.created_at) = p.target_date::date)
+          (trim(t.trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND LEFT(trim(t.trade_time), 10) = p.target_date) OR
+          (trim(t.trade_time) !~ '^\\d{4}-\\d{2}-\\d{2}' AND DATE(t.created_at) = p.target_date::date)
         )
           AND t.price IS NOT NULL
           AND t.price::numeric > 0
