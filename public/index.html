@@ -185,7 +185,8 @@
         poller = setInterval(async () => {
           try {
             // 仅重新加载最后 N 分钟也可，MVP全量即可
-            await loadData();
+            // 轮询更新时不重置视图缩放
+            await loadData(false);
           } catch (error) {
             console.error('轮询更新失败:', error);
           }
@@ -215,7 +216,7 @@
       }
 
       // 加载数据函数
-      async function loadData() {
+      async function loadData(shouldFitContent = true) {
         const symbol = document.getElementById('symbol').value.trim();
         const date = document.getElementById('date').value;
         const loadBtn = document.getElementById('load');
@@ -281,7 +282,9 @@
           series.setData(candles);
           
           // 自动调整视图
-          chart.timeScale().fitContent();
+          if (shouldFitContent) {
+            chart.timeScale().fitContent();
+          }
           
           showStatus(`成功加载 ${candles.length} 条K线数据`, 'success');
           
