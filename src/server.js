@@ -270,18 +270,15 @@ async function scanAndInsertAlerts() {
         FROM tos_trades t
         WHERE t.price IS NOT NULL AND t.price::numeric > 0
           AND COALESCE(t.size::numeric, 0) > 0
-          /* 使用 received_at 作为数据接收时间进行筛�?*/
+          /* 使用 received_at 作为数据接收时间进行筛选 */
           AND date_trunc('minute', (t.received_at AT TIME ZONE 'Asia/Shanghai')) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params))
           /* 使用 trade_time 作为实际交易时间进行验证 - 确保交易时间在合理范围内 */
-          AND (
-            /* 如果 trade_time 包含完整日期时间格式 */
-            (t.trade_time ~ '^\d{4}-\d{2}-\d{2}' AND 
-             date_trunc('minute', t.trade_time::timestamp) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params)))
-            OR
-            /* 如果 trade_time 只包含时间部分，则与当前日期组合后验�?*/
-            (t.trade_time !~ '^\d{4}-\d{2}-\d{2}' AND 
-             date_trunc('minute', ((SELECT target_date FROM params) || ' ' || t.trade_time)::timestamp) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params)))
-          )
+          AND date_trunc('minute', 
+            CASE 
+              WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN t.trade_time::timestamp
+              ELSE ((SELECT target_date FROM params) || ' ' || t.trade_time)::timestamp
+            END
+          ) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params))
       ),
       agg AS (
         SELECT symbol, bucket_local AS bucket,
