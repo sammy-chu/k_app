@@ -155,7 +155,8 @@ async function getFlexibleHills(pool, dateStr) {
     }
   }
 
-  results.sort((a, b) => b.fullness - a.fullness);
+  // Sort by peakTime descending (latest first)
+  results.sort((a, b) => new Date(b.peakTime) - new Date(a.peakTime));
   
   return {
     date: targetDate,
