@@ -14,10 +14,34 @@
       }
       #chart { 
         width: 100%; 
-        height: 600px; 
+        height: 500px; 
         margin-top: 20px;
         border: 1px solid #333;
-        border-radius: 8px;
+        border-radius: 8px 8px 0 0;
+        border-bottom: none;
+      }
+      #volume-chart {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #333;
+        border-radius: 0 0 8px 8px;
+        border-top: 1px solid #444;
+        position: relative;
+      }
+      #volume-tooltip {
+        position: absolute;
+        display: none;
+        padding: 8px;
+        box-sizing: border-box;
+        font-size: 12px;
+        text-align: left;
+        z-index: 1000;
+        pointer-events: none;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.9);
+        color: #ddd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
       }
       #toolbar { 
         display: flex; 
@@ -84,6 +108,7 @@
       <div id="status"></div>
     </div>
     <div id="chart"></div>
+    <div id="volume-chart"></div>
 
     <script>
       // 等待库加载完成
@@ -163,6 +188,114 @@
           wickUpColor: '#26a69a',
           wickDownColor: '#ef5350',
         });
+
+        // 创建成交量图表
+        const volumeChart = LightweightCharts.createChart(document.getElementById('volume-chart'), {
+          layout: { 
+            background: { type: 'solid', color: '#1a1a1a' }, 
+            textColor: '#ddd' 
+          },
+          rightPriceScale: { 
+            borderVisible: false,
+            scaleMargins: {
+              top: 0.1,
+              bottom: 0.1,
+            },
+          },
+          timeScale: { 
+            borderVisible: false,
+            timeVisible: true,
+            visible: false, // 隐藏时间轴，与主图表共享
+          },
+          grid: {
+            vertLines: { color: '#333' },
+            horzLines: { color: '#333' },
+          },
+        });
+
+        // 添加成交量系列
+        const volumeSeries = volumeChart.addSeries(LightweightCharts.HistogramSeries, {
+          color: '#26a69a',
+          priceFormat: {
+            type: 'volume',
+          },
+          priceScaleId: '', // set as an overlay setting,
+        });
+
+        // 创建 Tooltip 元素
+        const toolTip = document.createElement('div');
+        toolTip.id = 'volume-tooltip';
+        document.getElementById('volume-chart').appendChild(toolTip);
+
+        // 监听十字光标移动
+        volumeChart.subscribeCrosshairMove(param => {
+          const container = document.getElementById('volume-chart');
+          
+          if (
+            param.point === undefined ||
+            !param.time ||
+            param.point.x < 0 ||
+            param.point.x > container.clientWidth ||
+            param.point.y < 0 ||
+            param.point.y > container.clientHeight
+          ) {
+            toolTip.style.display = 'none';
+            return;
+          }
+
+          const data = param.seriesData.get(volumeSeries);
+          if (!data) {
+            toolTip.style.display = 'none';
+            return;
+          }
+          
+          const date = new Date(data.time * 1000);
+          // 使用与K线图一致的时区处理
+          const options = { timeZone: 'Asia/Shanghai' };
+          const dateStr = date.toLocaleString('zh-CN', { 
+            ...options,
+            month: 'numeric',
+            day: 'numeric',
+            hour12: false, 
+            hour: '2-digit', 
+            minute: '2-digit'
+          });
+          
+          const volumeStr = Math.round(data.value).toLocaleString();
+
+          toolTip.style.display = 'block';
+          toolTip.innerHTML = `<div>时间: ${dateStr}</div><div style="margin-top: 4px; color: ${data.color}">成交量: ${volumeStr}</div>`;
+          
+          // 智能定位
+          const toolTipWidth = 120;
+          const toolTipHeight = 50;
+          const margin = 10;
+          
+          let left = param.point.x + margin;
+          if (left + toolTipWidth > container.clientWidth) {
+            left = param.point.x - toolTipWidth - margin;
+          }
+          
+          let top = param.point.y + margin;
+          if (top + toolTipHeight > container.clientHeight) {
+            top = param.point.y - toolTipHeight - margin;
+          }
+          
+          toolTip.style.left = left + 'px';
+          toolTip.style.top = top + 'px';
+        });
+
+        // 同步两个图表
+        let isSyncing = false;
+        const syncHandler = (source, target) => (range) => {
+          if (isSyncing || !range) return;
+          isSyncing = true;
+          target.timeScale().setVisibleLogicalRange(range);
+          isSyncing = false;
+        };
+
+        chart.timeScale().subscribeVisibleLogicalRangeChange(syncHandler(chart, volumeChart));
+        volumeChart.timeScale().subscribeVisibleLogicalRangeChange(syncHandler(volumeChart, chart));
 
       // 轮询相关变量
       let poller;
@@ -266,7 +399,8 @@
               open: Number(r.o),
               high: Number(r.h),
               low: Number(r.l),
-              close: Number(r.c)
+              close: Number(r.c),
+              volume: Number(r.v)
             };
           }).filter(candle => 
             !isNaN(candle.open) && !isNaN(candle.high) && 
@@ -283,9 +417,19 @@
           // 设置数据到图表
           series.setData(candles);
           
+          // 设置成交量数据
+          const volumeData = candles.map(c => ({
+            time: c.time,
+            value: c.volume,
+            color: c.close >= c.open ? '#26a69a' : '#ef5350'
+          }));
+          volumeSeries.setData(volumeData);
+          
           // 自动调整视图
           if (shouldFitContent) {
             chart.timeScale().fitContent();
+            // volumeChart 会通过 syncHandler 自动同步，不需要单独 fitContent
+            // 但为了保险，可以在短暂延迟后 fit 一次，或者依赖 sync
           }
           
           showStatus(`成功加载 ${candles.length} 条K线数据`, 'success');
@@ -340,9 +484,9 @@
 
       // 响应式处理
       window.addEventListener('resize', () => {
-        chart.applyOptions({
-          width: document.getElementById('chart').clientWidth,
-        });
+        const width = document.getElementById('chart').clientWidth;
+        chart.applyOptions({ width });
+        volumeChart.applyOptions({ width });
       });
       
       } // 结束 initChart 函数

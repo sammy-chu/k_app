@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>山丘形放量监控</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #ddd;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .nav-links { text-align: center; margin-bottom: 30px; }
+        .nav-links a {
+            color: #007acc;
+            text-decoration: none;
+            padding: 8px 16px;
+            margin: 0 10px;
+            border: 1px solid #007acc;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+        .nav-links a:hover { background-color: #007acc; color: white; }
+        .header { margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        h1 { font-size: 1.5em; font-weight: normal; }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        input[type="date"] {
+            background: #2a2a2a;
+            border: 1px solid #444;
+            color: #ddd;
+            padding: 5px 10px;
+            border-radius: 4px;
+        }
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #0099ff; }
+
+        .card-list { display: flex; flex-direction: column; gap: 15px; }
+        .card {
+            background: #2a2a2a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .card-info { flex: 1; }
+        .symbol { font-size: 1.2em; color: #fff; font-weight: bold; margin-bottom: 5px; }
+        .meta { font-size: 0.9em; color: #aaa; display: flex; gap: 15px; }
+        .meta span { display: flex; align-items: center; gap: 5px; }
+        .badge {
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            background: #444;
+        }
+        .badge.high { background: #2e7d32; color: white; } /* High Fullness */
+        
+        .chart-container {
+            width: 300px;
+            height: 60px;
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #444;
+        }
+        .bar {
+            flex: 1;
+            background: #007acc;
+            min-height: 2px;
+            transition: height 0.3s;
+            position: relative;
+        }
+        .bar.peak { background: #ff5722; }
+        .bar:hover::after {
+            content: attr(data-vol);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        
+        .loading { text-align: center; color: #666; padding: 20px; }
+        .empty { text-align: center; color: #666; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-links">
+            <a href="/">首页</a>
+            <a href="/alerts">价格提醒</a>
+            <a href="/hills" style="background-color: #007acc; color: white;">山丘放量</a>
+        </div>
+
+        <div class="header">
+            <h1>宽幅山丘形放量监控</h1>
+            <div class="controls">
+                <input type="date" id="date-picker">
+                <button onclick="loadData(true)">刷新</button>
+            </div>
+        </div>
+
+        <div id="content" class="card-list">
+            <div class="loading">加载中...</div>
+        </div>
+    </div>
+
+    <script>
+        async function loadData(force = false) {
+            const date = document.getElementById('date-picker').value;
+            const container = document.getElementById('content');
+            const cacheKey = `hills_data_v2_${date}`;
+
+            // 尝试读取缓存
+            if (!force) {
+                const cached = sessionStorage.getItem(cacheKey);
+                if (cached) {
+                    try {
+                        const json = JSON.parse(cached);
+                        console.log('Loaded from cache:', cacheKey);
+                        renderData(json, true);
+                        return;
+                    } catch(e) {
+                        sessionStorage.removeItem(cacheKey);
+                    }
+                }
+            }
+
+            container.innerHTML = '<div class="loading">正在分析数据...</div>';
+
+            try {
+                const res = await fetch(`/api/patterns/flexible-hills?date=${date}`);
+                const json = await res.json();
+                
+                // 写入缓存
+                if (json.data) {
+                    sessionStorage.setItem(cacheKey, JSON.stringify(json));
+                }
+                
+                renderData(json, false);
+            } catch (e) {
+                console.error(e);
+                container.innerHTML = `
+                    <div class="empty" style="color: #f44336">
+                        <p>加载失败: ${e.message}</p>
+                        <button onclick="loadData(true)" style="margin-top: 10px; background: #333; border: 1px solid #555;">重试</button>
+                    </div>
+                `;
+            }
+        }
+
+        function renderData(json, fromCache) {
+            const container = document.getElementById('content');
+            const date = document.getElementById('date-picker').value;
+
+            if (!json.data || json.data.length === 0) {
+                container.innerHTML = '<div class="empty">该日期未发现符合条件的山丘形态</div>';
+                return;
+            }
+
+            // 如果API返回了实际扫描的日期，更新选择器
+            if (json.date && json.date !== date) {
+                document.getElementById('date-picker').value = json.date;
+            }
+
+            let html = '';
+            
+            // 添加缓存提示
+            if (fromCache) {
+                html += '<div style="text-align: center; color: #666; font-size: 0.8em; margin-bottom: 10px;">(已显示缓存数据，点击刷新获取最新)</div>';
+            }
+
+            json.data.forEach(item => {
+                // 构建柱状图
+                const maxVol = Math.max(...item.shape);
+                const bars = item.shape.map(vol => {
+                    const height = (vol / maxVol) * 100;
+                    const isPeak = vol === item.peakVol;
+                    return `<div class="bar ${isPeak ? 'peak' : ''}" style="height: ${height}%" data-vol="${vol}"></div>`;
+                }).join('');
+
+                const fullnessClass = item.fullness > 0.5 ? 'high' : '';
+                const startTimeStr = new Date(item.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                const endTimeStr = new Date(item.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                const peakTimeStr = new Date(item.peakTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+
+                html += `
+                    <div class="card">
+                        <div class="card-info">
+                            <div class="symbol">${item.symbol}</div>
+                            <div class="meta">
+                                <span>🕒 ${startTimeStr} - ${endTimeStr} (峰值 ${peakTimeStr})</span>
+                                <span>📊 持续: ${item.duration}分</span>
+                                <span>💥 倍数: ${item.ratio.toFixed(1)}x</span>
+                                <span class="badge ${fullnessClass}">饱满度: ${item.fullness.toFixed(2)}</span>
+                            </div>
+                        </div>
+                        <div class="chart-container">
+                            ${bars}
+                        </div>
+                    </div>
+                `;
+            });
+            container.innerHTML = html;
+        }
+
+        // 初始化日期为今天 (使用本地时间)
+        const now = new Date();
+        const localDate = new Date(now.getTime() - (now.getTimezoneOffset() * 60000)).toISOString().split('T')[0];
+        document.getElementById('date-picker').value = localDate;
+
+        // 自动加载
+        loadData();
+    </script>
+</body>
+</html>

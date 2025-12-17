@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
+const { getFlexibleHills } = require('./scan-flexible-hills');
 const app = express();
 
 // 全局配置变量 - 成交量阈�?
@@ -239,6 +240,18 @@ app.post('/api/config/volume-threshold', express.json(), (req, res) => {
   }
 });
 
+// === 山丘形放量查询 API (Flexible Hills) ===
+app.get('/api/patterns/flexible-hills', async (req, res) => {
+  try {
+    const dateQuery = req.query.date;
+    const result = await getFlexibleHills(pool, dateQuery);
+    res.json(result);
+  } catch (e) {
+    console.error('flexible-hills query failed:', e);
+    res.status(500).json({ error: 'query failed' });
+  }
+});
+
 // Alert monitoring configuration and functions
 const ALERT_THRESHOLD_PCT = Number(process.env.ALERT_THRESHOLD_PCT || 0.01);
 const DAILY_VOLUME_MIN = Number(process.env.DAILY_VOLUME_MIN || 5000);
@@ -335,7 +348,12 @@ app.get('/alerts', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/alerts.html'));
 });
 
-// 在静态服务与监听之前启动监控（或�?listen 之后皆可�?
+// 山丘形态页面路由
+app.get('/hills', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/hills.html'));
+});
+
+// 在静态服务与监听之前启动监控（或?listen 之后皆可?
 startAlertMonitor();
 console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
 console.log(`[DAILY_VOLUME_MIN] configured threshold: ${DAILY_VOLUME_MIN}`);
