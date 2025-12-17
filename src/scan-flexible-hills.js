@@ -76,7 +76,7 @@ async function getFlexibleHills(pool, dateStr) {
       SELECT * FROM peaks_raw
       WHERE 
         volume > 1000 
-        AND volume > baseline * 3 
+        AND volume > baseline * 2 
         AND volume > v_m1 AND volume > v_m2 
         AND volume > v_p1 AND volume > v_p2
     ),
@@ -135,7 +135,7 @@ async function getFlexibleHills(pool, dateStr) {
 
     const duration = rightIndex - leftIndex + 1;
     
-    if (duration >= 5) {
+    if (duration >= 4) {
       let totalVol = 0;
       for(let i=leftIndex; i<=rightIndex; i++) totalVol += data[i].v;
       const fullness = totalVol / (peakVol * duration);
@@ -187,8 +187,8 @@ if (require.main === module) {
         );
         console.log('-'.repeat(120));
 
-        result.data.slice(0, 30).forEach(r => {
-          const startStr = new Date(r.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        result.data.slice(0, 100).forEach(r => {
+        const startStr = new Date(r.startTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
           const endStr = new Date(r.endTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
           const peakStr = new Date(r.peakTime).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
           const timeRange = `${startStr}-${endStr} (P:${peakStr})`;
