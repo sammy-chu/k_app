@@ -44,7 +44,8 @@ async function getFlexibleHills(pool, dateStr) {
            WHEN trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', trim(trade_time)::timestamp)
            ELSE date_trunc('minute', ($1 || ' ' || trim(trade_time))::timestamp)
         END AS bucket,
-        SUM(size) as volume
+        SUM(size) as volume,
+        AVG(price) as avg_price
       FROM tos_trades
       WHERE 
         (trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND LEFT(trim(trade_time), 10) = $1::text) OR
@@ -56,6 +57,7 @@ async function getFlexibleHills(pool, dateStr) {
          symbol,
          bucket,
          volume,
+         avg_price,
          AVG(volume) OVER (PARTITION BY symbol ORDER BY bucket ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) as baseline
        FROM raw_data
     ),
@@ -64,6 +66,7 @@ async function getFlexibleHills(pool, dateStr) {
         symbol,
         bucket,
         volume,
+        avg_price,
         baseline,
         LAG(volume, 1) OVER w as v_m1,
         LAG(volume, 2) OVER w as v_m2,
@@ -76,6 +79,7 @@ async function getFlexibleHills(pool, dateStr) {
       SELECT * FROM peaks_raw
       WHERE 
         volume > 1000 
+        AND volume * avg_price > 50000 
         AND volume > baseline * 2 
         AND volume > v_m1 AND volume > v_m2 
         AND volume > v_p1 AND volume > v_p2
