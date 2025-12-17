@@ -167,19 +167,20 @@ app.get('/api/alerts', async (req, res) => {
         SELECT
           -- 以上海时区的当日开�?结束，转换为UTC以匹配库中时间列
           (date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) AT TIME ZONE 'UTC') AS start_utc,
-          ((date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) + interval '1 day') AT TIME ZONE 'UTC') AS end_utc,
-          (now() AT TIME ZONE 'Asia/Shanghai')::date AS target_date
-      ), vol AS (
-        SELECT tr.symbol, SUM(tr.size) AS vol
-        FROM tos_trades tr, today t
-        WHERE tr.received_at >= t.start_utc AND tr.received_at < t.end_utc
-          AND COALESCE(tr.size::numeric, 0) > 0
-        GROUP BY tr.symbol
+          ((date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) + interval '1 day') AT TIME ZONE 'UTC') AS end_utc
       )
-      SELECT a.symbol, a.bucket, a.open, a.high, a.low, a.close, a.amplitude_pct, a.direction, a.rule_id, a.created_at
+      SELECT a.symbol, a.bucket, a.open, a.high, a.low, a.close, a.amplitude_pct, a.direction, a.rule_id, a.created_at,
+             v.vol as current_volume
       FROM k_alerts a
       JOIN today t ON true
-      LEFT JOIN vol v ON v.symbol = a.symbol
+      LEFT JOIN LATERAL (
+        SELECT SUM(tr.size) AS vol
+        FROM tos_trades tr
+        WHERE tr.symbol = a.symbol
+          AND tr.received_at >= t.start_utc 
+          AND tr.received_at < t.end_utc
+          AND COALESCE(tr.size::numeric, 0) > 0
+      ) v ON true
       WHERE ($1::timestamptz IS NULL OR a.created_at >= $1::timestamptz)
         AND a.bucket >= t.start_utc
         AND COALESCE(v.vol, 0) >= $2
@@ -334,10 +335,102 @@ async function scanAndInsertAlerts() {
   }
 }
 
+async function scanVolumeBreakouts() {
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
+    // 计算当前分钟（或上一分钟）的放量情况
+    // 注意：我们需要确保当前分钟已经结束或者数据足够，为了稳健起见，我们检测"上一分钟"
+    const sql = `
+      WITH params AS (
+        SELECT 
+           date_trunc('minute', now() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '1 minute' AS target_bucket
+      ),
+      raw_data AS (
+        SELECT 
+          symbol,
+          date_trunc('minute', 
+             CASE 
+               WHEN trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN trade_time::timestamp
+               ELSE (CURRENT_DATE || ' ' || trim(trade_time))::timestamp
+             END
+          ) AS bucket,
+          SUM(size) as volume,
+          AVG(price) as avg_price,
+          -- 获取开盘收盘价用于插入 k_alerts 表
+          (ARRAY_AGG(price ORDER BY trade_time ASC))[1] as open,
+          MAX(price) as high,
+          MIN(price) as low,
+          (ARRAY_AGG(price ORDER BY trade_time DESC))[1] as close
+        FROM tos_trades
+        WHERE 
+          -- 只查最近30分钟的数据，减少扫描范围
+          (trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND trade_time::timestamp >= (now() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '30 minutes'))
+          OR
+          (trim(trade_time) !~ '^\\d{4}-\\d{2}-\\d{2}' AND (CURRENT_DATE || ' ' || trim(trade_time))::timestamp >= (now() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '30 minutes'))
+        GROUP BY 1, 2
+      ),
+      stats AS (
+         SELECT
+           symbol,
+           bucket,
+           volume,
+           avg_price,
+           open, high, low, close,
+           -- 计算前20分钟的均量 (Baseline)
+           AVG(volume) OVER (
+              PARTITION BY symbol 
+              ORDER BY bucket 
+              ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
+           ) as baseline,
+           -- 获取前一分钟的量 (用于确认上升趋势)
+           LAG(volume, 1) OVER (PARTITION BY symbol ORDER BY bucket) as prev_volume
+         FROM raw_data
+      ),
+      candidates AS (
+        SELECT *,
+          CASE WHEN baseline > 0 THEN volume / baseline ELSE 0 END as ratio
+        FROM stats
+        WHERE bucket = (SELECT target_bucket FROM params)
+      )
+      INSERT INTO k_alerts(symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at)
+      SELECT 
+        symbol, 
+        (bucket AT TIME ZONE 'Asia/Shanghai'), -- 存入 timestamptz
+        open, high, low, close, 
+        ratio, -- 将放量倍数存入 amplitude_pct 字段
+        1,     -- direction 1 表示正向/上涨
+        'volume_breakout', 
+        now()
+      FROM candidates
+      WHERE 
+        volume > 1000                  -- 最小成交量
+        AND volume * avg_price > 50000 -- 最小成交额
+        AND ratio > 3.0                -- 放量倍数 > 3倍
+        AND volume > prev_volume       -- 处于上升态势
+      ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
+      RETURNING symbol, bucket, amplitude_pct;
+    `;
+
+    const { rows } = await pool.query(sql);
+    if (rows.length > 0) {
+      console.log(`[Volume Monitor] Detected ${rows.length} breakouts:`, rows.map(r => `${r.symbol}(${Number(r.amplitude_pct).toFixed(1)}x)`).join(', '));
+    }
+  } catch (e) {
+    console.error('scanVolumeBreakouts error:', e.message);
+  }
+}
+
 function startAlertMonitor() {
-  // 先立即跑一次，然后�?5 秒跑一�?
-  scanAndInsertAlerts();
-  setInterval(scanAndInsertAlerts, 5000);
+  // 1. 价格波动监控 (原有的)
+  // scanAndInsertAlerts();
+  // setInterval(scanAndInsertAlerts, 5000);
+
+  // 2. 放量突破监控 (新增的)
+  // scanVolumeBreakouts();
+  // setInterval(scanVolumeBreakouts, 10000);
+  
+  console.log('[ALERT monitor] Monitoring temporarily disabled for debugging');
 }
 
 // 静态文件服�?

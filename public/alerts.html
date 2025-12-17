@@ -254,6 +254,13 @@
         .amp-up { color: #26a69a; }      /* 上涨绿色 */
         .amp-down { color: #ef5350; }    /* 下跌红色 */
         .amp-flat { color: #888; }       /* 平盘灰色 */
+        .amp-volume { color: #ff9800; font-weight: bold; } /* 放量橙色 */
+        
+        /* 放量提醒的特殊背景 */
+        .volume-breakout-item {
+            background-color: rgba(255, 152, 0, 0.1);
+            border-left: 3px solid #ff9800;
+        }
 
         /* 响应式设计 */
         @media (max-width: 768px) {
@@ -389,18 +396,31 @@
             }
 
             alertsList.innerHTML = filteredAlerts.map(alert => {
-                const amplitude = (parseFloat(alert.amplitude_pct) * 100).toFixed(2);
+                const isVolumeBreakout = alert.rule_id === 'volume_breakout';
+                let amplitudeText, amplitudeClass;
+                
+                if (isVolumeBreakout) {
+                    // 放量突破显示倍数
+                    const ratio = parseFloat(alert.amplitude_pct).toFixed(1);
+                    amplitudeText = `🌋 放量 ${ratio}x`;
+                    amplitudeClass = 'amp-volume';
+                } else {
+                    // 价格振幅显示百分比
+                    const amplitude = (parseFloat(alert.amplitude_pct) * 100).toFixed(2);
+                    amplitudeText = `振幅 ${amplitude}%`;
+                    amplitudeClass = getAmplitudeClass(amplitude, alert.direction);
+                }
+
                 const direction = getDirectionIndicator(alert.direction);
-                const amplitudeClass = getAmplitudeClass(amplitude, alert.direction);
                 const time = formatBeijingTime(alert.created_at);
                 const open = parseFloat(alert.open).toFixed(4);
                 const close = parseFloat(alert.close).toFixed(4);
                 
                 return `
-                    <li class="alert-item">
+                    <li class="alert-item ${isVolumeBreakout ? 'volume-breakout-item' : ''}">
                         <span class="alert-symbol">${alert.symbol}</span>
                         <span class="alert-time">${time}</span>
-                        <span class="alert-amplitude ${amplitudeClass}">振幅 ${amplitude}%</span>
+                        <span class="alert-amplitude ${amplitudeClass}">${amplitudeText}</span>
                         <span class="alert-direction">${direction}</span>
                         <span class="alert-prices">O:${open} C:${close}</span>
                     </li>
@@ -434,6 +454,11 @@
             }
             
             return alerts.filter(alert => {
+                // 放量提醒不受振幅阈值过滤影响，总是显示
+                if (alert.rule_id === 'volume_breakout') {
+                    return true;
+                }
+
                 const amplitude = parseFloat(alert.amplitude_pct);
                 
                 // 健壮性检查：处理无效的amplitude_pct值
