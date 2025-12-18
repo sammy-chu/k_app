@@ -423,14 +423,14 @@ async function scanVolumeBreakouts() {
 
 function startAlertMonitor() {
   // 1. 价格波动监控 (原有的)
-  // scanAndInsertAlerts();
-  // setInterval(scanAndInsertAlerts, 5000);
+  scanAndInsertAlerts();
+  setInterval(scanAndInsertAlerts, 5000);
 
   // 2. 放量突破监控 (新增的)
-  // scanVolumeBreakouts();
-  // setInterval(scanVolumeBreakouts, 10000);
+  scanVolumeBreakouts();
+  setInterval(scanVolumeBreakouts, 10000);
   
-  console.log('[ALERT monitor] Monitoring temporarily disabled for debugging');
+  // console.log('[ALERT monitor] Monitoring temporarily disabled for debugging');
 }
 
 // 静态文件服�?
