@@ -165,13 +165,24 @@ app.get('/api/alerts', async (req, res) => {
     const sql = `
       WITH today AS (
         SELECT
-          -- 以上海时区的当日开�?结束，转换为UTC以匹配库中时间列
+          -- 以上海时区的当日开?结束，转换为UTC以匹配库中时间列
           (date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) AT TIME ZONE 'UTC') AS start_utc,
           ((date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) + interval '1 day') AT TIME ZONE 'UTC') AS end_utc
-      )
-      SELECT a.symbol, a.bucket, a.open, a.high, a.low, a.close, a.amplitude_pct, a.direction, a.rule_id, a.created_at,
+      ),
+      combined_alerts AS (
+         SELECT symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at
+         FROM k_alerts
+         WHERE bucket >= (SELECT start_utc FROM today)
+         
+         UNION ALL
+         
+         SELECT symbol, bucket_time AS bucket, NULL AS open, NULL AS high, NULL AS low, NULL AS close, breakout_ratio AS amplitude_pct, 1 AS direction, 'volume_breakout' AS rule_id, created_at
+         FROM k_hill_alerts
+         WHERE bucket_time >= (SELECT start_utc FROM today)
+       )
+       SELECT a.symbol, a.bucket, a.open, a.high, a.low, a.close, a.amplitude_pct, a.direction, a.rule_id, a.created_at,
              v.vol as current_volume
-      FROM k_alerts a
+      FROM combined_alerts a
       JOIN today t ON true
       LEFT JOIN LATERAL (
         SELECT SUM(tr.size) AS vol
@@ -388,19 +399,26 @@ async function scanVolumeBreakouts() {
          FROM raw_data
       ),
       candidates AS (
-        SELECT *,
-          CASE WHEN baseline > 0 THEN volume / baseline ELSE 0 END as ratio
-        FROM stats
-        WHERE bucket = (SELECT target_bucket FROM params)
+        SELECT s.*,
+          CASE WHEN s.baseline > 0 THEN s.volume / s.baseline ELSE 0 END as ratio,
+          (
+            SELECT json_agg(json_build_object('t', r.bucket, 'v', r.volume) ORDER BY r.bucket)
+            FROM raw_data r
+            WHERE r.symbol = s.symbol 
+              AND r.bucket >= s.bucket - INTERVAL '20 minutes'
+              AND r.bucket <= s.bucket
+          ) as hill_data
+        FROM stats s
+        WHERE s.bucket = (SELECT target_bucket FROM params)
       )
-      INSERT INTO k_alerts(symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at)
+      INSERT INTO k_hill_alerts(symbol, bucket_time, volume, baseline_volume, breakout_ratio, hill_data, created_at)
       SELECT 
         symbol, 
-        (bucket AT TIME ZONE 'Asia/Shanghai'), -- 存入 timestamptz
-        open, high, low, close, 
-        ratio, -- 将放量倍数存入 amplitude_pct 字段
-        1,     -- direction 1 表示正向/上涨
-        'volume_breakout', 
+        (bucket AT TIME ZONE 'Asia/Shanghai'), 
+        volume,
+        baseline,
+        ratio,
+        hill_data,
         now()
       FROM candidates
       WHERE 
@@ -408,13 +426,13 @@ async function scanVolumeBreakouts() {
         AND volume * avg_price > 50000 -- 最小成交额
         AND ratio > 3.0                -- 放量倍数 > 3倍
         AND volume > prev_volume       -- 处于上升态势
-      ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
-      RETURNING symbol, bucket, amplitude_pct;
+      ON CONFLICT (symbol, bucket_time) DO NOTHING
+      RETURNING symbol, bucket_time, breakout_ratio;
     `;
 
     const { rows } = await pool.query(sql);
     if (rows.length > 0) {
-      console.log(`[Volume Monitor] Detected ${rows.length} breakouts:`, rows.map(r => `${r.symbol}(${Number(r.amplitude_pct).toFixed(1)}x)`).join(', '));
+      console.log(`[Volume Monitor] Detected ${rows.length} breakouts:`, rows.map(r => `${r.symbol}(${Number(r.breakout_ratio).toFixed(1)}x)`).join(', '));
     }
   } catch (e) {
     console.error('scanVolumeBreakouts error:', e.message);

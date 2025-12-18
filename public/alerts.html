@@ -387,8 +387,16 @@
                 return;
             }
 
+            // 过滤掉 volume_breakout 类型的提醒
+            const displayAlerts = alerts.filter(alert => alert.rule_id !== 'volume_breakout');
+
+            if (displayAlerts.length === 0) {
+                alertsList.innerHTML = '<li class="no-alerts">暂无提醒数据</li>';
+                return;
+            }
+
             // 应用振幅筛选
-            const filteredAlerts = applyAmplitudeFilter(alerts);
+            const filteredAlerts = applyAmplitudeFilter(displayAlerts);
             
             if (filteredAlerts.length === 0) {
                 alertsList.innerHTML = '<li class="no-alerts">没有符合筛选条件的提醒数据</li>';
