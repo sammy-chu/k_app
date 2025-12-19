@@ -166,14 +166,9 @@
                 renderData(data);
                 log('Render complete');
             } catch (e) {
+                log('Error loading data: ' + e.message);
                 console.error(e);
-                log(`Error: ${e.message}`);
-                container.innerHTML = `
-                    <div class="empty error">
-                        <p>加载失败: ${e.message}</p>
-                        <button onclick="loadData()" style="margin-top: 10px; background: #333; border: 1px solid #555;">重试</button>
-                    </div>
-                `;
+                container.innerHTML = `<div style="color:red">加载失败: ${e.message}<br>请检查后端服务器是否启动 (localhost:8889)</div>`;
             }
         }
 
