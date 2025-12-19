@@ -1,8 +1,10 @@
 const express = require('express');
 const path = require('path');
+const compression = require('compression');
 const { Pool } = require('pg');
 const { getFlexibleHills } = require('./scan-flexible-hills');
 const app = express();
+app.use(compression());
 
 // 全局配置变量 - 成交量阈�?
 let currentVolumeThreshold = Number(process.env.DAILY_VOLUME_MIN || 5000);
@@ -266,19 +268,25 @@ app.get('/api/patterns/flexible-hills', async (req, res) => {
 
 // === K Hill Alerts 查询 API (Database) ===
 app.get('/api/hill-alerts', async (req, res) => {
+  const start = Date.now();
   try {
     const limit = Math.min(Number(req.query.limit || 50), 100);
     const minRatio = Number(req.query.min_ratio || 0);
+    const schema = process.env.PGSCHEMA || 'market_data';
 
     const sql = `
       SELECT id, symbol, bucket_time, volume, baseline_volume, breakout_ratio, hill_data, created_at
-      FROM k_hill_alerts
+      FROM ${schema}.k_hill_alerts
       WHERE breakout_ratio >= $1
       ORDER BY bucket_time DESC
       LIMIT $2
     `;
     
     const { rows } = await pool.query(sql, [minRatio, limit]);
+    const duration = Date.now() - start;
+    const size = JSON.stringify(rows).length;
+    console.log(`[API] /api/hill-alerts: ${rows.length} rows, took ${duration}ms, size ${Math.round(size/1024)}KB`);
+    
     res.json(rows);
   } catch (e) {
     console.error('hill-alerts query failed:', e);
