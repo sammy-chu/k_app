@@ -1,10 +1,18 @@
 const express = require('express');
+// const compression = require('compression'); // Temporarily disabled for debugging
 const path = require('path');
-const compression = require('compression');
 const { Pool } = require('pg');
 const { getFlexibleHills } = require('./scan-flexible-hills');
 const app = express();
-app.use(compression());
+
+// app.use(compression());
+
+// Enable CORS for development/preview
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
+  next();
+});
 
 // 全局配置变量 - 成交量阈�?
 let currentVolumeThreshold = Number(process.env.DAILY_VOLUME_MIN || 5000);
@@ -15,7 +23,10 @@ const pool = new Pool({
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'ppro8_market_data',
   user: process.env.PGUSER || 'postgres',
-  password: process.env.PGPASSWORD || 'postgres'
+  password: process.env.PGPASSWORD || 'postgres',
+  max: 20, // Increase pool size to handle concurrent background tasks + API requests
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000, // Fail fast if no connection available
 });
 
 app.get('/health', (req, res) => {
@@ -268,25 +279,19 @@ app.get('/api/patterns/flexible-hills', async (req, res) => {
 
 // === K Hill Alerts 查询 API (Database) ===
 app.get('/api/hill-alerts', async (req, res) => {
-  const start = Date.now();
   try {
     const limit = Math.min(Number(req.query.limit || 50), 100);
     const minRatio = Number(req.query.min_ratio || 0);
-    const schema = process.env.PGSCHEMA || 'market_data';
 
     const sql = `
       SELECT id, symbol, bucket_time, volume, baseline_volume, breakout_ratio, hill_data, created_at
-      FROM ${schema}.k_hill_alerts
+      FROM k_hill_alerts
       WHERE breakout_ratio >= $1
       ORDER BY bucket_time DESC
       LIMIT $2
     `;
     
     const { rows } = await pool.query(sql, [minRatio, limit]);
-    const duration = Date.now() - start;
-    const size = JSON.stringify(rows).length;
-    console.log(`[API] /api/hill-alerts: ${rows.length} rows, took ${duration}ms, size ${Math.round(size/1024)}KB`);
-    
     res.json(rows);
   } catch (e) {
     console.error('hill-alerts query failed:', e);
@@ -470,13 +475,33 @@ async function scanVolumeBreakouts() {
 }
 
 function startAlertMonitor() {
+  const runScan = async (name, fn, interval) => {
+    while (true) {
+      const start = Date.now();
+      try {
+        await fn();
+      } catch (e) {
+        console.error(`[${name}] Error:`, e.message);
+      }
+      const duration = Date.now() - start;
+      if (duration > 1000) {
+        console.log(`[${name}] Finished in ${duration}ms`);
+      }
+      
+      // Wait for interval before next run
+      await new Promise(resolve => setTimeout(resolve, interval));
+    }
+  };
+
   // 1. 价格波动监控 (原有的)
-  scanAndInsertAlerts();
-  setInterval(scanAndInsertAlerts, 5000);
+  // scanAndInsertAlerts();
+  // setInterval(scanAndInsertAlerts, 5000);
+  runScan('PriceMonitor', scanAndInsertAlerts, 5000);
 
   // 2. 放量突破监控 (新增的)
-  scanVolumeBreakouts();
-  setInterval(scanVolumeBreakouts, 10000);
+  // scanVolumeBreakouts();
+  // setInterval(scanVolumeBreakouts, 10000);
+  runScan('VolumeMonitor', scanVolumeBreakouts, 10000);
   
   // console.log('[ALERT monitor] Monitoring temporarily disabled for debugging');
 }

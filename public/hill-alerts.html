@@ -137,6 +137,20 @@
     </div>
 
     <script>
+        // Global error handler
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            const logEl = document.getElementById('debug-log');
+            if (logEl) {
+                logEl.style.display = 'block';
+                logEl.textContent += `Global Error: ${msg} at ${lineNo}:${columnNo}\n`;
+            }
+            const container = document.getElementById('content');
+            if (container) {
+                container.innerHTML = `<div style="color:red">页面错误: ${msg}</div>`;
+            }
+            return false;
+        };
+
         function log(msg) {
             console.log(msg);
             const logEl = document.getElementById('debug-log');
@@ -181,28 +195,11 @@
             }
 
             try {
-                const html = data.map(item => {
+                const html = data.map((item, index) => {
                     const date = new Date(item.bucket_time).toLocaleString('zh-CN', {
                         month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
                     });
                     
-                    // 处理 hill_data
-                    let chartHtml = '';
-                    if (item.hill_data && Array.isArray(item.hill_data)) {
-                        // 找出最大值用于归一化
-                        const maxVol = Math.max(...item.hill_data.map(d => Number(d.v) || 0));
-                        const currentVol = Number(item.volume);
-                        
-                        chartHtml = item.hill_data.map(d => {
-                            const val = Number(d.v) || 0;
-                            const height = maxVol > 0 ? (val / maxVol) * 100 : 0;
-                            // 宽松比较，因为一个是聚合值一个是单点值，可能存在微小差异
-                            const isPeak = Math.abs(val - currentVol) < 0.001 || val === currentVol; 
-                            const volStr = (val / 1000).toFixed(1) + 'k';
-                            return `<div class="bar ${isPeak ? 'peak' : ''}" style="height: ${height}%" data-vol="${volStr}"></div>`;
-                        }).join('');
-                    }
-
                     return `
                         <div class="card">
                             <div class="card-info">
@@ -215,17 +212,73 @@
                                 </div>
                             </div>
                             <div class="chart-container">
-                                ${chartHtml}
+                                <canvas class="hill-chart" data-index="${index}" width="300" height="80"></canvas>
                             </div>
                         </div>
                     `;
                 }).join('');
 
                 container.innerHTML = html;
+                
+                // Initialize Intersection Observer for lazy drawing
+                initObserver(data);
+
             } catch (renderError) {
                 log(`Render error: ${renderError.message}`);
                 throw renderError;
             }
+        }
+
+        function initObserver(data) {
+            const observer = new IntersectionObserver((entries, obs) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const canvas = entry.target;
+                        const index = canvas.dataset.index;
+                        const item = data[index];
+                        if (item) {
+                            drawChart(canvas, item);
+                        }
+                        obs.unobserve(canvas); // Only draw once
+                    }
+                });
+            }, { rootMargin: '100px' });
+
+            document.querySelectorAll('canvas.hill-chart').forEach(canvas => {
+                observer.observe(canvas);
+            });
+        }
+
+        function drawChart(canvas, item) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const hillData = item.hill_data || [];
+            
+            if (hillData.length === 0) return;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            const maxVol = Math.max(...hillData.map(d => Number(d.v) || 0));
+            if (maxVol === 0) return;
+
+            const barWidth = width / hillData.length;
+            const currentVol = Number(item.volume);
+
+            hillData.forEach((d, i) => {
+                const val = Number(d.v) || 0;
+                const barHeight = (val / maxVol) * height;
+                const x = i * barWidth;
+                const y = height - barHeight;
+
+                // Check if this bar corresponds to the alert volume
+                // (using loose equality or small epsilon)
+                const isPeak = Math.abs(val - currentVol) < 0.001 || val === currentVol;
+
+                ctx.fillStyle = isPeak ? '#ff5722' : '#007acc';
+                ctx.fillRect(x, y, Math.max(0.8, barWidth - 0.5), barHeight);
+            });
         }
 
         // 初始加载
