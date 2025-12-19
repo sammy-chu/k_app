@@ -264,6 +264,28 @@ app.get('/api/patterns/flexible-hills', async (req, res) => {
   }
 });
 
+// === K Hill Alerts 查询 API (Database) ===
+app.get('/api/hill-alerts', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit || 50), 100);
+    const minRatio = Number(req.query.min_ratio || 0);
+
+    const sql = `
+      SELECT id, symbol, bucket_time, volume, baseline_volume, breakout_ratio, hill_data, created_at
+      FROM k_hill_alerts
+      WHERE breakout_ratio >= $1
+      ORDER BY bucket_time DESC
+      LIMIT $2
+    `;
+    
+    const { rows } = await pool.query(sql, [minRatio, limit]);
+    res.json(rows);
+  } catch (e) {
+    console.error('hill-alerts query failed:', e);
+    res.status(500).json({ error: 'internal_error' });
+  }
+});
+
 // Alert monitoring configuration and functions
 const ALERT_THRESHOLD_PCT = Number(process.env.ALERT_THRESHOLD_PCT || 0.01);
 const DAILY_VOLUME_MIN = Number(process.env.DAILY_VOLUME_MIN || 5000);
@@ -462,6 +484,11 @@ app.get('/alerts', (req, res) => {
 // 山丘形态页面路由
 app.get('/hills', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/hills.html'));
+});
+
+// 山丘放量提醒列表页面路由
+app.get('/hill-alerts', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/hill-alerts.html'));
 });
 
 // 在静态服务与监听之前启动监控（或?listen 之后皆可?
