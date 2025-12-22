@@ -416,15 +416,18 @@ async function scanVolumeBreakouts() {
            s.volume,
            s.avg_price,
            s.open, s.high, s.low, s.close,
-           -- 计算从今日开盘到当前时间的中位数成交量 (Baseline)
+           -- 计算从今日开盘到当前时间的加权平均成交量 (Baseline - WMA)
            (
-             SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY rd.volume)
-             FROM raw_data rd
-             WHERE rd.symbol = s.symbol 
-               AND rd.volume > 0  -- 剔除成交量为0的数据
-               AND rd.bucket < s.bucket  -- 当前时间之前的数据
-               AND date_trunc('day', rd.bucket AT TIME ZONE 'Asia/Shanghai') = 
-                   date_trunc('day', s.bucket AT TIME ZONE 'Asia/Shanghai')  -- 同一天
+             SELECT SUM(sub.v * sub.r) / NULLIF(SUM(sub.r), 0)
+             FROM (
+               SELECT rd.volume as v, ROW_NUMBER() OVER (ORDER BY rd.bucket ASC) as r
+               FROM raw_data rd
+               WHERE rd.symbol = s.symbol 
+                 AND rd.volume > 0  -- 剔除成交量为0的数据
+                 AND rd.bucket < s.bucket  -- 当前时间之前的数据
+                 AND date_trunc('day', rd.bucket AT TIME ZONE 'Asia/Shanghai') = 
+                     date_trunc('day', s.bucket AT TIME ZONE 'Asia/Shanghai')  -- 同一天
+             ) sub
            ) as baseline,
            -- 获取前两分钟的量
            LAG(s.volume, 1) OVER (PARTITION BY s.symbol ORDER BY s.bucket) as v_m1,
