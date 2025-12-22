@@ -22,16 +22,14 @@ async function getFlexibleHills(pool, dateStr) {
   let targetDate = dateStr;
   if (!targetDate) {
     const dateRes = await pool.query(`
-      SELECT MAX(LEFT(trade_time, 10)) as last_date 
+      SELECT MAX(DATE(received_at)) as last_date 
       FROM tos_trades 
-      WHERE trade_time ~ '^\\d{4}-\\d{2}-\\d{2}'
     `);
     targetDate = dateRes.rows[0].last_date;
     if (!targetDate) {
-       const createRes = await pool.query('SELECT MAX(DATE(created_at)) as last_date FROM tos_trades');
-       targetDate = createRes.rows[0].last_date;
+       // Fallback to current date if no data
+       targetDate = new Date().toISOString().split('T')[0];
     }
-    if (!targetDate) targetDate = new Date().toISOString().split('T')[0];
   }
 
   // 2. 执行查询
@@ -39,17 +37,14 @@ async function getFlexibleHills(pool, dateStr) {
   const sql = `
     WITH raw_data AS (
       SELECT 
-        symbol,
-        CASE 
-           WHEN trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', trim(trade_time)::timestamp)
-           ELSE date_trunc('minute', ($1 || ' ' || trim(trade_time))::timestamp)
-        END AS bucket,
-        SUM(size) as volume,
-        AVG(price) as avg_price
-      FROM tos_trades
+        t.symbol,
+        date_trunc('minute', t.received_at) AS bucket,
+        SUM(t.size) as volume,
+        AVG(t.price) as avg_price
+      FROM tos_trades t
+      JOIN user_symbols u ON t.symbol = u.symbol
       WHERE 
-        (trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND LEFT(trim(trade_time), 10) = $1::text) OR
-        (trim(trade_time) !~ '^\\d{4}-\\d{2}-\\d{2}' AND DATE(created_at) = $1::date)
+        DATE(t.received_at) = $1::date
       GROUP BY 1, 2
     ),
     smoothed AS (
@@ -69,9 +64,7 @@ async function getFlexibleHills(pool, dateStr) {
         avg_price,
         baseline,
         LAG(volume, 1) OVER w as v_m1,
-        LAG(volume, 2) OVER w as v_m2,
-        LEAD(volume, 1) OVER w as v_p1,
-        LEAD(volume, 2) OVER w as v_p2
+        LAG(volume, 2) OVER w as v_m2
       FROM smoothed
       WINDOW w AS (PARTITION BY symbol ORDER BY bucket)
     ),
@@ -80,9 +73,8 @@ async function getFlexibleHills(pool, dateStr) {
       WHERE 
         volume > 1000 
         AND volume * avg_price > 50000 
-        AND volume > baseline * 2 
+        AND volume > baseline * 3
         AND volume > v_m1 AND volume > v_m2 
-        AND volume > v_p1 AND volume > v_p2
     ),
     context AS (
       SELECT

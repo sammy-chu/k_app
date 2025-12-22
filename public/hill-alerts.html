@@ -125,6 +125,8 @@
         <div class="header">
             <h1>山丘放量提醒列表</h1>
             <div class="controls">
+                <label for="minRatio" style="font-size: 14px; color: #aaa;">最小倍数:</label>
+                <input type="number" id="minRatio" value="5.0" step="0.5" style="width: 60px; padding: 4px; background: #333; border: 1px solid #444; color: #fff; border-radius: 4px; margin-right: 10px;">
                 <button onclick="loadData()">刷新</button>
             </div>
         </div>
@@ -158,31 +160,38 @@
             logEl.textContent += msg + '\n';
         }
 
-        async function loadData() {
+        async function loadData(isBackground = false) {
             const container = document.getElementById('content');
-            container.innerHTML = '<div class="loading">正在加载数据...</div>';
-            document.getElementById('debug-log').textContent = ''; // Clear log
+            const minRatioInput = document.getElementById('minRatio');
+            const minRatio = minRatioInput ? minRatioInput.value : 5.0;
 
-            log('开始加载数据...');
+            if (!isBackground) {
+                container.innerHTML = '<div class="loading">正在加载数据...</div>';
+                document.getElementById('debug-log').textContent = ''; // Clear log
+                log('开始加载数据...');
+            }
+            
             try {
-                log('Fetching /api/hill-alerts...');
-                const res = await fetch('/api/hill-alerts?limit=50');
-                log(`Response status: ${res.status}`);
+                if (!isBackground) log(`Fetching /api/hill-alerts with min_ratio=${minRatio}...`);
+                const res = await fetch(`/api/hill-alerts?limit=50&min_ratio=${minRatio}`);
+                if (!isBackground) log(`Response status: ${res.status}`);
                 
                 if (!res.ok) {
                     throw new Error(`HTTP error! status: ${res.status}`);
                 }
                 
-                log('Parsing JSON...');
+                if (!isBackground) log('Parsing JSON...');
                 const data = await res.json();
-                log(`Got ${data ? data.length : 0} records`);
+                if (!isBackground) log(`Got ${data ? data.length : 0} records`);
                 
                 renderData(data);
-                log('Render complete');
+                if (!isBackground) log('Render complete');
             } catch (e) {
                 log('Error loading data: ' + e.message);
                 console.error(e);
-                container.innerHTML = `<div style="color:red">加载失败: ${e.message}<br>请检查后端服务器是否启动 (localhost:8889)</div>`;
+                if (!isBackground) {
+                    container.innerHTML = `<div style="color:red">加载失败: ${e.message}<br>请检查后端服务器是否启动 (localhost:8889)</div>`;
+                }
             }
         }
 
@@ -283,6 +292,9 @@
 
         // 初始加载
         loadData();
+
+        // 自动刷新 (10秒)
+        setInterval(() => loadData(true), 10000);
     </script>
 </body>
 </html>

@@ -394,44 +394,42 @@ async function scanVolumeBreakouts() {
       ),
       raw_data AS (
         SELECT 
-          symbol,
-          date_trunc('minute', 
-             CASE 
-               WHEN trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN trade_time::timestamp
-               ELSE (CURRENT_DATE || ' ' || trim(trade_time))::timestamp
-             END
-          ) AS bucket,
-          SUM(size) as volume,
-          AVG(price) as avg_price,
+          t.symbol,
+          date_trunc('minute', t.received_at) AS bucket,
+          SUM(t.size) as volume,
+          AVG(t.price) as avg_price,
           -- 获取开盘收盘价用于插入 k_alerts 表
-          (ARRAY_AGG(price ORDER BY trade_time ASC))[1] as open,
-          MAX(price) as high,
-          MIN(price) as low,
-          (ARRAY_AGG(price ORDER BY trade_time DESC))[1] as close
-        FROM tos_trades
+          (ARRAY_AGG(t.price ORDER BY t.received_at ASC))[1] as open,
+          MAX(t.price) as high,
+          MIN(t.price) as low,
+          (ARRAY_AGG(t.price ORDER BY t.received_at DESC))[1] as close
+        FROM tos_trades t
+        JOIN user_symbols u ON t.symbol = u.symbol
         WHERE 
-          -- 只查最近30分钟的数据，减少扫描范围
-          (trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND trade_time::timestamp >= (now() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '30 minutes'))
-          OR
-          (trim(trade_time) !~ '^\\d{4}-\\d{2}-\\d{2}' AND (CURRENT_DATE || ' ' || trim(trade_time))::timestamp >= (now() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '30 minutes'))
+          t.received_at >= (now() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '30 minutes')
         GROUP BY 1, 2
       ),
       stats AS (
          SELECT
-           symbol,
-           bucket,
-           volume,
-           avg_price,
-           open, high, low, close,
-           -- 计算前20分钟的均量 (Baseline)
-           AVG(volume) OVER (
-              PARTITION BY symbol 
-              ORDER BY bucket 
-              ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING
+           s.symbol,
+           s.bucket,
+           s.volume,
+           s.avg_price,
+           s.open, s.high, s.low, s.close,
+           -- 计算从今日开盘到当前时间的中位数成交量 (Baseline)
+           (
+             SELECT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY rd.volume)
+             FROM raw_data rd
+             WHERE rd.symbol = s.symbol 
+               AND rd.volume > 0  -- 剔除成交量为0的数据
+               AND rd.bucket < s.bucket  -- 当前时间之前的数据
+               AND date_trunc('day', rd.bucket AT TIME ZONE 'Asia/Shanghai') = 
+                   date_trunc('day', s.bucket AT TIME ZONE 'Asia/Shanghai')  -- 同一天
            ) as baseline,
-           -- 获取前一分钟的量 (用于确认上升趋势)
-           LAG(volume, 1) OVER (PARTITION BY symbol ORDER BY bucket) as prev_volume
-         FROM raw_data
+           -- 获取前两分钟的量
+           LAG(s.volume, 1) OVER (PARTITION BY s.symbol ORDER BY s.bucket) as v_m1,
+           LAG(s.volume, 2) OVER (PARTITION BY s.symbol ORDER BY s.bucket) as v_m2
+         FROM raw_data s
       ),
       candidates AS (
         SELECT s.*,
@@ -440,8 +438,8 @@ async function scanVolumeBreakouts() {
             SELECT json_agg(json_build_object('t', r.bucket, 'v', r.volume) ORDER BY r.bucket)
             FROM raw_data r
             WHERE r.symbol = s.symbol 
-              AND r.bucket >= s.bucket - INTERVAL '20 minutes'
-              AND r.bucket <= s.bucket
+              AND r.bucket >= s.bucket - INTERVAL '15 minutes'
+              AND r.bucket <= s.bucket + INTERVAL '15 minutes'
           ) as hill_data
         FROM stats s
         WHERE s.bucket = (SELECT target_bucket FROM params)
@@ -460,7 +458,8 @@ async function scanVolumeBreakouts() {
         volume > 1000                  -- 最小成交量
         AND volume * avg_price > 50000 -- 最小成交额
         AND ratio > 3.0                -- 放量倍数 > 3倍
-        AND volume > prev_volume       -- 处于上升态势
+        AND volume > v_m1              -- 大于前1分钟
+        AND volume > v_m2              -- 大于前2分钟
       ON CONFLICT (symbol, bucket_time) DO NOTHING
       RETURNING symbol, bucket_time, breakout_ratio;
     `;
