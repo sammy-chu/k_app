@@ -19,6 +19,7 @@
         border: 1px solid #333;
         border-radius: 8px 8px 0 0;
         border-bottom: none;
+        position: relative;
       }
       #volume-chart {
         width: 100%;
@@ -191,6 +192,28 @@
           wickDownColor: '#ef5350',
         });
 
+        // 添加移动平均线系列
+        const ma5Series = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#E6E6FA', // 浅紫色 (Lavender)
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        const ma10Series = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FFFF00', // 黄色
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        const ma20Series = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FF00FF', // 紫红色 (Magenta)
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
         // 创建成交量图表
         const volumeChart = LightweightCharts.createChart(document.getElementById('volume-chart'), {
           layout: { 
@@ -224,12 +247,60 @@
           priceScaleId: '', // set as an overlay setting,
         });
 
-        // 创建 Tooltip 元素
-        const toolTip = document.createElement('div');
-        toolTip.id = 'volume-tooltip';
-        document.getElementById('volume-chart').appendChild(toolTip);
-
-        // 监听十字光标移动
+          // 创建 Tooltip 元素
+          const toolTip = document.createElement('div');
+          toolTip.id = 'volume-tooltip';
+          document.getElementById('volume-chart').appendChild(toolTip);
+  
+          // 创建主图表 Tooltip 元素 (MA显示)
+          const mainToolTip = document.createElement('div');
+          mainToolTip.style.position = 'absolute';
+          mainToolTip.style.display = 'none';
+          mainToolTip.style.padding = '8px';
+          mainToolTip.style.boxSizing = 'border-box';
+          mainToolTip.style.fontSize = '12px';
+          mainToolTip.style.textAlign = 'left';
+          mainToolTip.style.zIndex = '1000';
+          mainToolTip.style.pointerEvents = 'none';
+          mainToolTip.style.border = '1px solid #444';
+          mainToolTip.style.borderRadius = '4px';
+          mainToolTip.style.background = 'rgba(0, 0, 0, 0.7)';
+          mainToolTip.style.color = '#ddd';
+          mainToolTip.style.top = '10px';
+          mainToolTip.style.left = '10px';
+          document.getElementById('chart').appendChild(mainToolTip);
+  
+          // 监听主图表十字光标移动
+          chart.subscribeCrosshairMove(param => {
+             if (
+               param.point === undefined ||
+               !param.time ||
+               param.point.x < 0 ||
+               param.point.x > document.getElementById('chart').clientWidth ||
+               param.point.y < 0 ||
+               param.point.y > document.getElementById('chart').clientHeight
+             ) {
+               mainToolTip.style.display = 'none';
+               return;
+             }
+  
+             const ma5 = param.seriesData.get(ma5Series);
+             const ma10 = param.seriesData.get(ma10Series);
+             const ma20 = param.seriesData.get(ma20Series);
+             
+             if (ma5 || ma10 || ma20) {
+                mainToolTip.style.display = 'block';
+                let html = '';
+                if (ma5) html += `<span style="color: #E6E6FA">MA5: ${ma5.value.toFixed(2)}</span> `;
+                if (ma10) html += `<span style="color: #FFFF00">MA10: ${ma10.value.toFixed(2)}</span> `;
+                if (ma20) html += `<span style="color: #FF00FF">MA20: ${ma20.value.toFixed(2)}</span>`;
+                mainToolTip.innerHTML = html;
+             } else {
+                mainToolTip.style.display = 'none';
+             }
+          });
+  
+          // 监听十字光标移动
         volumeChart.subscribeCrosshairMove(param => {
           const container = document.getElementById('volume-chart');
           
@@ -419,6 +490,15 @@
           // 设置数据到图表
           series.setData(candles);
           
+          // 设置移动平均线数据
+          const ma5Data = rows.map((r, i) => ({ time: candles[i].time, value: Number(r.ma5) })).filter(d => !isNaN(d.value) && d.value > 0);
+          const ma10Data = rows.map((r, i) => ({ time: candles[i].time, value: Number(r.ma10) })).filter(d => !isNaN(d.value) && d.value > 0);
+          const ma20Data = rows.map((r, i) => ({ time: candles[i].time, value: Number(r.ma20) })).filter(d => !isNaN(d.value) && d.value > 0);
+
+          ma5Series.setData(ma5Data);
+          ma10Series.setData(ma10Data);
+          ma20Series.setData(ma20Data);
+
           // 设置成交量数据
           const volumeData = candles.map(c => ({
             time: c.time,
