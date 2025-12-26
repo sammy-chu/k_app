@@ -108,15 +108,39 @@ app.get('/api/ohlcv', async (req, res) => {
         FROM series s
         LEFT JOIN ohlcv o USING (bucket)
         ORDER BY s.bucket
+      ),
+      -- 使用分组计数法实现 LOCF (Last Observation Carried Forward) 以填补收盘价空洞
+      locf_grp AS (
+        SELECT *,
+               COUNT(close) OVER (ORDER BY bucket) as grp
+        FROM joined
+      ),
+      filled_data AS (
+        SELECT 
+          bucket,
+          open, high, low,
+          COALESCE(volume, 0) as v,
+          FIRST_VALUE(close) OVER (PARTITION BY grp ORDER BY bucket) as c_filled
+        FROM locf_grp
+      ),
+      final_ohlc AS (
+        SELECT 
+          bucket AS t,
+          -- 如果没有开盘价，沿用上一分钟的收盘价
+          COALESCE(open, LAG(c_filled) OVER (ORDER BY bucket)) AS o,
+          COALESCE(high, COALESCE(open, LAG(c_filled) OVER (ORDER BY bucket))) AS h,
+          COALESCE(low,  COALESCE(open, LAG(c_filled) OVER (ORDER BY bucket))) AS l,
+          c_filled AS c,
+          v
+        FROM filled_data
       )
-      SELECT bucket AS t,
-             COALESCE(open, LAG(close) OVER (ORDER BY bucket)) AS o,
-             COALESCE(high, COALESCE(open, LAG(close) OVER (ORDER BY bucket))) AS h,
-             COALESCE(low,  COALESCE(open, LAG(close) OVER (ORDER BY bucket))) AS l,
-             COALESCE(close, LAG(close) OVER (ORDER BY bucket)) AS c,
-             COALESCE(volume, 0) AS v
-      FROM joined
-      WHERE bucket IS NOT NULL;`;
+      SELECT 
+        t, o, h, l, c, v,
+        ROUND(AVG(c) OVER (ORDER BY t ROWS BETWEEN 4 PRECEDING AND CURRENT ROW), 2) AS ma5,
+        ROUND(AVG(c) OVER (ORDER BY t ROWS BETWEEN 9 PRECEDING AND CURRENT ROW), 2) AS ma10,
+        ROUND(AVG(c) OVER (ORDER BY t ROWS BETWEEN 19 PRECEDING AND CURRENT ROW), 2) AS ma20
+      FROM final_ohlc
+      WHERE t IS NOT NULL;`;
 
     const { rows } = await pool.query(sql, [symbol, date]);
     return res.json(rows);
