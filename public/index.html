@@ -59,6 +59,22 @@
         color: #ddd;
         font-size: 14px;
       }
+      .ma-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 12px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .ma-toggle input {
+        margin: 0;
+        cursor: pointer;
+      }
+      .ma-toggle span {
+        font-size: 14px;
+        font-weight: 500;
+      }
       #toolbar input:focus {
         outline: none;
         border-color: #007acc;
@@ -108,6 +124,18 @@
       <input id="symbol" placeholder="输入symbol，如 AMD.BL" value="AMD.BL" />
       <input id="date" type="date" />
       <button id="load">加载数据</button>
+      
+      <!-- MA Toggles -->
+      <label class="ma-toggle" style="color: #E6E6FA">
+        <input type="checkbox" id="toggle-ma5" checked> MA5
+      </label>
+      <label class="ma-toggle" style="color: #FFFF00">
+        <input type="checkbox" id="toggle-ma10" checked> MA10
+      </label>
+      <label class="ma-toggle" style="color: #FF00FF">
+        <input type="checkbox" id="toggle-ma20" checked> MA20
+      </label>
+
       <div id="status"></div>
     </div>
     <div id="chart"></div>
@@ -548,6 +576,17 @@
       // 绑定事件
       document.getElementById('load').addEventListener('click', handleLoadClick);
       
+      // MA Toggle 事件
+      document.getElementById('toggle-ma5').addEventListener('change', (e) => {
+        ma5Series.applyOptions({ visible: e.target.checked });
+      });
+      document.getElementById('toggle-ma10').addEventListener('change', (e) => {
+        ma10Series.applyOptions({ visible: e.target.checked });
+      });
+      document.getElementById('toggle-ma20').addEventListener('change', (e) => {
+        ma20Series.applyOptions({ visible: e.target.checked });
+      });
+
       // 回车键加载
       document.getElementById('symbol').addEventListener('keypress', (e) => {
         if (e.key === 'Enter') loadData();
