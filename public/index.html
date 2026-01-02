@@ -25,11 +25,35 @@
         width: 100%;
         height: 150px;
         border: 1px solid #333;
+        border-radius: 0;
+        border-top: 1px solid #444;
+        position: relative;
+        border-bottom: none;
+      }
+      #macd-chart {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #333;
         border-radius: 0 0 8px 8px;
         border-top: 1px solid #444;
         position: relative;
       }
       #volume-tooltip {
+        position: absolute;
+        display: none;
+        padding: 8px;
+        box-sizing: border-box;
+        font-size: 12px;
+        text-align: left;
+        z-index: 1000;
+        pointer-events: none;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.9);
+        color: #ddd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      }
+      #macd-tooltip {
         position: absolute;
         display: none;
         padding: 8px;
@@ -140,6 +164,7 @@
     </div>
     <div id="chart"></div>
     <div id="volume-chart"></div>
+    <div id="macd-chart"></div>
 
     <script>
       // 等待库加载完成
@@ -147,6 +172,53 @@
         if (typeof LightweightCharts === 'undefined') {
           setTimeout(initChart, 100);
           return;
+        }
+
+        // MACD Calculation Function
+        function calculateMACD(data, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+          let emaFast = 0;
+          let emaSlow = 0;
+          let dea = 0;
+          
+          const result = [];
+          
+          data.forEach((item, i) => {
+            const close = item.close;
+            
+            if (i === 0) {
+              emaFast = close;
+              emaSlow = close;
+              dea = 0;
+            } else {
+              // EMA formula: Price(t) * k + EMA(y) * (1 - k)
+              // k = 2 / (N + 1)
+              const kFast = 2 / (fastPeriod + 1);
+              const kSlow = 2 / (slowPeriod + 1);
+              
+              emaFast = close * kFast + emaFast * (1 - kFast);
+              emaSlow = close * kSlow + emaSlow * (1 - kSlow);
+            }
+            
+            const dif = emaFast - emaSlow;
+            
+            if (i === 0) {
+              dea = dif;
+            } else {
+              const kSignal = 2 / (signalPeriod + 1);
+              dea = dif * kSignal + dea * (1 - kSignal);
+            }
+            
+            const macdBar = 2 * (dif - dea);
+            
+            result.push({
+              time: item.time,
+              dif,
+              dea,
+              macdBar
+            });
+          });
+          
+          return result;
         }
         
         // 创建图表
@@ -275,10 +347,65 @@
           priceScaleId: '', // set as an overlay setting,
         });
 
+        // Create MACD Chart
+        const macdChart = LightweightCharts.createChart(document.getElementById('macd-chart'), {
+          layout: { 
+            background: { type: 'solid', color: '#1a1a1a' }, 
+            textColor: '#ddd' 
+          },
+          rightPriceScale: { 
+            borderVisible: false,
+            scaleMargins: {
+              top: 0.1,
+              bottom: 0.1,
+            },
+          },
+          timeScale: { 
+            borderVisible: false,
+            timeVisible: true,
+            visible: false,
+          },
+          grid: {
+            vertLines: { color: '#333' },
+            horzLines: { color: '#333' },
+          },
+        });
+
+        // Add MACD Series
+        const macdHistogramSeries = macdChart.addSeries(LightweightCharts.HistogramSeries, {
+          color: '#26a69a',
+          lineWidth: 1,
+          priceFormat: {
+            type: 'volume',
+            precision: 2,
+            minMove: 0.01,
+          },
+          priceScaleId: 'right',
+        });
+        
+        const macdFastSeries = macdChart.addSeries(LightweightCharts.LineSeries, {
+          color: '#2962FF', // Blue for DIF
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        
+        const macdSlowSeries = macdChart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FF6D00', // Orange for DEA
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
           // 创建 Tooltip 元素
           const toolTip = document.createElement('div');
           toolTip.id = 'volume-tooltip';
           document.getElementById('volume-chart').appendChild(toolTip);
+          
+          // Create MACD Tooltip
+          const macdToolTip = document.createElement('div');
+          macdToolTip.id = 'macd-tooltip';
+          document.getElementById('macd-chart').appendChild(macdToolTip);
   
           // 创建主图表 Tooltip 元素 (MA显示)
           const mainToolTip = document.createElement('div');
@@ -386,17 +513,73 @@
           toolTip.style.top = top + 'px';
         });
 
-        // 同步两个图表
+        // MACD Crosshair Move
+        macdChart.subscribeCrosshairMove(param => {
+          const container = document.getElementById('macd-chart');
+          
+          if (
+            param.point === undefined ||
+            !param.time ||
+            param.point.x < 0 ||
+            param.point.x > container.clientWidth ||
+            param.point.y < 0 ||
+            param.point.y > container.clientHeight
+          ) {
+            macdToolTip.style.display = 'none';
+            return;
+          }
+
+          const difData = param.seriesData.get(macdFastSeries);
+          const deaData = param.seriesData.get(macdSlowSeries);
+          const histData = param.seriesData.get(macdHistogramSeries);
+          
+          if (!difData || !deaData || !histData) {
+             macdToolTip.style.display = 'none';
+             return;
+          }
+          
+          macdToolTip.style.display = 'block';
+          macdToolTip.innerHTML = `
+            <div style="display: flex; gap: 8px;">
+              <span style="color: #2962FF">DIF: ${difData.value.toFixed(2)}</span>
+              <span style="color: #FF6D00">DEA: ${deaData.value.toFixed(2)}</span>
+              <span style="color: ${histData.color}">MACD: ${histData.value.toFixed(2)}</span>
+            </div>
+          `;
+          
+          // Position
+          let left = param.point.x + 10;
+          let top = param.point.y + 10;
+          
+          if (left + 150 > container.clientWidth) {
+            left = param.point.x - 150 - 10;
+          }
+           if (top + 40 > container.clientHeight) {
+            top = param.point.y - 40 - 10;
+          }
+          
+          macdToolTip.style.left = left + 'px';
+          macdToolTip.style.top = top + 'px';
+        });
+
+        // Sync Charts
+        const charts = [chart, volumeChart, macdChart];
         let isSyncing = false;
-        const syncHandler = (source, target) => (range) => {
+        
+        const syncHandler = (source) => (range) => {
           if (isSyncing || !range) return;
           isSyncing = true;
-          target.timeScale().setVisibleLogicalRange(range);
+          for (const target of charts) {
+            if (target !== source) {
+              target.timeScale().setVisibleLogicalRange(range);
+            }
+          }
           isSyncing = false;
         };
 
-        chart.timeScale().subscribeVisibleLogicalRangeChange(syncHandler(chart, volumeChart));
-        volumeChart.timeScale().subscribeVisibleLogicalRangeChange(syncHandler(volumeChart, chart));
+        charts.forEach(c => {
+          c.timeScale().subscribeVisibleLogicalRangeChange(syncHandler(c));
+        });
 
       // 轮询相关变量
       let poller;
@@ -535,6 +718,29 @@
           }));
           volumeSeries.setData(volumeData);
           
+          // Calculate and set MACD data
+          const macdData = calculateMACD(candles);
+          
+          const histogramData = macdData.map(d => ({
+            time: d.time,
+            value: d.macdBar,
+            color: d.macdBar >= 0 ? '#26a69a' : '#ef5350',
+          }));
+          
+          const fastData = macdData.map(d => ({
+            time: d.time,
+            value: d.dif,
+          }));
+          
+          const slowData = macdData.map(d => ({
+            time: d.time,
+            value: d.dea,
+          }));
+          
+          macdHistogramSeries.setData(histogramData);
+          macdFastSeries.setData(fastData);
+          macdSlowSeries.setData(slowData);
+          
           // 自动调整视图
           if (shouldFitContent) {
             chart.timeScale().fitContent();
@@ -608,6 +814,7 @@
         const width = document.getElementById('chart').clientWidth;
         chart.applyOptions({ width });
         volumeChart.applyOptions({ width });
+        macdChart.applyOptions({ width });
       });
       
       } // 结束 initChart 函数
