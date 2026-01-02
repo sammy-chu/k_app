@@ -160,6 +160,15 @@
         <input type="checkbox" id="toggle-ma20" checked> MA20
       </label>
 
+      <!-- Chart Toggles -->
+      <div style="width: 1px; height: 20px; background: #444; margin: 0 8px;"></div>
+      <label class="ma-toggle">
+        <input type="checkbox" id="toggle-volume" checked> Volume
+      </label>
+      <label class="ma-toggle">
+        <input type="checkbox" id="toggle-macd" checked> MACD
+      </label>
+
       <div id="status"></div>
     </div>
     <div id="chart"></div>
@@ -792,6 +801,50 @@
       document.getElementById('toggle-ma20').addEventListener('change', (e) => {
         ma20Series.applyOptions({ visible: e.target.checked });
       });
+
+      // Chart Toggle Logic
+      function updateChartLayout() {
+        const showVolume = document.getElementById('toggle-volume').checked;
+        const showMacd = document.getElementById('toggle-macd').checked;
+        
+        const chartEl = document.getElementById('chart');
+        const volumeEl = document.getElementById('volume-chart');
+        const macdEl = document.getElementById('macd-chart');
+        
+        // Visibility
+        volumeEl.style.display = showVolume ? 'block' : 'none';
+        macdEl.style.display = showMacd ? 'block' : 'none';
+        
+        // Styling for borders and radius
+        // Reset all first
+        chartEl.style.borderRadius = '8px 8px 0 0';
+        chartEl.style.borderBottom = 'none';
+        
+        volumeEl.style.borderRadius = '0';
+        volumeEl.style.borderBottom = 'none';
+        
+        macdEl.style.borderRadius = '0 0 8px 8px';
+        macdEl.style.borderBottom = '1px solid #333';
+        
+        // Determine the last visible element
+        let lastVisible = chartEl;
+        if (showVolume) lastVisible = volumeEl;
+        if (showMacd) lastVisible = macdEl;
+        
+        // Apply bottom radius to the last visible element
+        if (lastVisible === chartEl) {
+          chartEl.style.borderRadius = '8px 8px 8px 8px';
+          chartEl.style.borderBottom = '1px solid #333';
+        } else if (lastVisible === volumeEl) {
+          volumeEl.style.borderRadius = '0 0 8px 8px';
+          volumeEl.style.borderBottom = '1px solid #333';
+        }
+        
+        // Adjust middle elements if needed (e.g. if Volume is hidden, MACD top border is fine)
+      }
+
+      document.getElementById('toggle-volume').addEventListener('change', updateChartLayout);
+      document.getElementById('toggle-macd').addEventListener('change', updateChartLayout);
 
       // 回车键加载
       document.getElementById('symbol').addEventListener('keypress', (e) => {
