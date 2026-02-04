@@ -38,6 +38,15 @@
         border-top: 1px solid #444;
         position: relative;
       }
+      #rsi-chart {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #333;
+        border-radius: 0 0 8px 8px;
+        border-top: 1px solid #444;
+        position: relative;
+        border-bottom: 1px solid #333;
+      }
       #volume-tooltip {
         position: absolute;
         display: none;
@@ -54,6 +63,21 @@
         box-shadow: 0 2px 4px rgba(0,0,0,0.5);
       }
       #macd-tooltip {
+        position: absolute;
+        display: none;
+        padding: 8px;
+        box-sizing: border-box;
+        font-size: 12px;
+        text-align: left;
+        z-index: 1000;
+        pointer-events: none;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.9);
+        color: #ddd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      }
+      #rsi-tooltip {
         position: absolute;
         display: none;
         padding: 8px;
@@ -160,6 +184,14 @@
         <input type="checkbox" id="toggle-ma20" checked> MA20
       </label>
 
+      <!-- EMA Toggles -->
+      <label class="ma-toggle" style="color: #2962FF">
+        <input type="checkbox" id="toggle-ema12"> EMA12
+      </label>
+      <label class="ma-toggle" style="color: #FF6D00">
+        <input type="checkbox" id="toggle-ema26"> EMA26
+      </label>
+
       <!-- Chart Toggles -->
       <div style="width: 1px; height: 20px; background: #444; margin: 0 8px;"></div>
       <label class="ma-toggle">
@@ -168,12 +200,16 @@
       <label class="ma-toggle">
         <input type="checkbox" id="toggle-macd" checked> MACD
       </label>
+      <label class="ma-toggle">
+        <input type="checkbox" id="toggle-rsi"> RSI
+      </label>
 
       <div id="status"></div>
     </div>
     <div id="chart"></div>
     <div id="volume-chart"></div>
     <div id="macd-chart"></div>
+    <div id="rsi-chart" style="display: none;"></div>
 
     <script>
       // 等待库加载完成
@@ -223,10 +259,60 @@
               time: item.time,
               dif,
               dea,
-              macdBar
+              macdBar,
+              emaFast,
+              emaSlow
             });
           });
           
+          return result;
+        }
+
+        // RSI Calculation Function
+        function calculateRSI(data, period = 14) {
+          const result = [];
+          let avgGain = 0;
+          let avgLoss = 0;
+          let changes = [];
+
+          data.forEach((item, i) => {
+            if (i === 0) {
+              result.push({ time: item.time, value: NaN });
+              return;
+            }
+
+            const change = item.close - data[i - 1].close;
+            const gain = change > 0 ? change : 0;
+            const loss = change < 0 ? Math.abs(change) : 0;
+
+            if (i <= period) {
+              changes.push({ gain, loss });
+              if (i === period) {
+                let sumGain = 0;
+                let sumLoss = 0;
+                changes.forEach(c => {
+                  sumGain += c.gain;
+                  sumLoss += c.loss;
+                });
+                avgGain = sumGain / period;
+                avgLoss = sumLoss / period;
+                
+                const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+                const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+                result.push({ time: item.time, value: rsi });
+              } else {
+                result.push({ time: item.time, value: NaN });
+              }
+            } else {
+              avgGain = ((avgGain * (period - 1)) + gain) / period;
+              avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+
+              const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+              const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+
+              result.push({ time: item.time, value: rsi });
+            }
+          });
           return result;
         }
         
@@ -323,6 +409,23 @@
           lastValueVisible: false,
         });
 
+        // Add EMA Series
+        const emaFastSeries = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#2962FF', // Blue
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          visible: false, // Default hidden
+        });
+
+        const emaSlowSeries = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FF6D00', // Orange
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          visible: false, // Default hidden
+        });
+
         // 创建成交量图表
         const volumeChart = LightweightCharts.createChart(document.getElementById('volume-chart'), {
           layout: { 
@@ -406,6 +509,55 @@
           lastValueVisible: false,
         });
 
+        // Create RSI Chart
+        const rsiChart = LightweightCharts.createChart(document.getElementById('rsi-chart'), {
+          layout: { 
+            background: { type: 'solid', color: '#1a1a1a' }, 
+            textColor: '#ddd' 
+          },
+          rightPriceScale: { 
+            borderVisible: false,
+            scaleMargins: {
+              top: 0.1,
+              bottom: 0.1,
+            },
+          },
+          timeScale: { 
+            borderVisible: false,
+            timeVisible: true,
+            visible: false,
+          },
+          grid: {
+            vertLines: { color: '#333' },
+            horzLines: { color: '#333' },
+          },
+        });
+
+        // Add RSI Series
+        const rsiSeries = rsiChart.addSeries(LightweightCharts.LineSeries, {
+          color: '#7B1FA2', // Purple
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        // Add 70/30 reference lines
+        rsiSeries.createPriceLine({
+          price: 70,
+          color: '#ef5350',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: false,
+        });
+        
+        rsiSeries.createPriceLine({
+          price: 30,
+          color: '#26a69a',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: false,
+        });
+
           // 创建 Tooltip 元素
           const toolTip = document.createElement('div');
           toolTip.id = 'volume-tooltip';
@@ -415,6 +567,11 @@
           const macdToolTip = document.createElement('div');
           macdToolTip.id = 'macd-tooltip';
           document.getElementById('macd-chart').appendChild(macdToolTip);
+
+          // Create RSI Tooltip
+          const rsiToolTip = document.createElement('div');
+          rsiToolTip.id = 'rsi-tooltip';
+          document.getElementById('rsi-chart').appendChild(rsiToolTip);
   
           // 创建主图表 Tooltip 元素 (MA显示)
           const mainToolTip = document.createElement('div');
@@ -451,13 +608,17 @@
              const ma5 = param.seriesData.get(ma5Series);
              const ma10 = param.seriesData.get(ma10Series);
              const ma20 = param.seriesData.get(ma20Series);
+             const emaFast = param.seriesData.get(emaFastSeries);
+             const emaSlow = param.seriesData.get(emaSlowSeries);
              
-             if (ma5 || ma10 || ma20) {
+             if (ma5 || ma10 || ma20 || emaFast || emaSlow) {
                 mainToolTip.style.display = 'block';
                 let html = '';
                 if (ma5) html += `<span style="color: #E6E6FA">MA5: ${ma5.value.toFixed(2)}</span> `;
                 if (ma10) html += `<span style="color: #FFFF00">MA10: ${ma10.value.toFixed(2)}</span> `;
-                if (ma20) html += `<span style="color: #FF00FF">MA20: ${ma20.value.toFixed(2)}</span>`;
+                if (ma20) html += `<span style="color: #FF00FF">MA20: ${ma20.value.toFixed(2)}</span> `;
+                if (emaFast && document.getElementById('toggle-ema12').checked) html += `<span style="color: #2962FF">EMA12: ${emaFast.value.toFixed(2)}</span> `;
+                if (emaSlow && document.getElementById('toggle-ema26').checked) html += `<span style="color: #FF6D00">EMA26: ${emaSlow.value.toFixed(2)}</span>`;
                 mainToolTip.innerHTML = html;
              } else {
                 mainToolTip.style.display = 'none';
@@ -571,8 +732,49 @@
           macdToolTip.style.top = top + 'px';
         });
 
+        // RSI Crosshair Move
+        rsiChart.subscribeCrosshairMove(param => {
+          const container = document.getElementById('rsi-chart');
+          
+          if (
+            param.point === undefined ||
+            !param.time ||
+            param.point.x < 0 ||
+            param.point.x > container.clientWidth ||
+            param.point.y < 0 ||
+            param.point.y > container.clientHeight
+          ) {
+            rsiToolTip.style.display = 'none';
+            return;
+          }
+
+          const rsiData = param.seriesData.get(rsiSeries);
+          
+          if (!rsiData) {
+             rsiToolTip.style.display = 'none';
+             return;
+          }
+          
+          rsiToolTip.style.display = 'block';
+          rsiToolTip.innerHTML = `<span style="color: #7B1FA2">RSI(14): ${rsiData.value.toFixed(2)}</span>`;
+          
+          // Position
+          let left = param.point.x + 10;
+          let top = param.point.y + 10;
+          
+          if (left + 100 > container.clientWidth) {
+            left = param.point.x - 100 - 10;
+          }
+           if (top + 40 > container.clientHeight) {
+            top = param.point.y - 40 - 10;
+          }
+          
+          rsiToolTip.style.left = left + 'px';
+          rsiToolTip.style.top = top + 'px';
+        });
+
         // Sync Charts
-        const charts = [chart, volumeChart, macdChart];
+        const charts = [chart, volumeChart, macdChart, rsiChart];
         let isSyncing = false;
         
         const syncHandler = (source) => (range) => {
@@ -749,7 +951,18 @@
           macdHistogramSeries.setData(histogramData);
           macdFastSeries.setData(fastData);
           macdSlowSeries.setData(slowData);
+
+          // Set EMA Series Data
+          const emaFastData = macdData.map(d => ({ time: d.time, value: d.emaFast }));
+          const emaSlowData = macdData.map(d => ({ time: d.time, value: d.emaSlow }));
+
+          emaFastSeries.setData(emaFastData);
+          emaSlowSeries.setData(emaSlowData);
           
+          // Calculate and set RSI Data
+          const rsiData = calculateRSI(candles);
+          rsiSeries.setData(rsiData);
+
           // 自动调整视图
           if (shouldFitContent) {
             chart.timeScale().fitContent();
@@ -802,18 +1015,29 @@
         ma20Series.applyOptions({ visible: e.target.checked });
       });
 
+      // EMA Toggle Events
+      document.getElementById('toggle-ema12').addEventListener('change', (e) => {
+        emaFastSeries.applyOptions({ visible: e.target.checked });
+      });
+      document.getElementById('toggle-ema26').addEventListener('change', (e) => {
+        emaSlowSeries.applyOptions({ visible: e.target.checked });
+      });
+
       // Chart Toggle Logic
       function updateChartLayout() {
         const showVolume = document.getElementById('toggle-volume').checked;
         const showMacd = document.getElementById('toggle-macd').checked;
+        const showRsi = document.getElementById('toggle-rsi').checked;
         
         const chartEl = document.getElementById('chart');
         const volumeEl = document.getElementById('volume-chart');
         const macdEl = document.getElementById('macd-chart');
+        const rsiEl = document.getElementById('rsi-chart');
         
         // Visibility
         volumeEl.style.display = showVolume ? 'block' : 'none';
         macdEl.style.display = showMacd ? 'block' : 'none';
+        rsiEl.style.display = showRsi ? 'block' : 'none';
         
         // Styling for borders and radius
         // Reset all first
@@ -823,13 +1047,17 @@
         volumeEl.style.borderRadius = '0';
         volumeEl.style.borderBottom = 'none';
         
-        macdEl.style.borderRadius = '0 0 8px 8px';
-        macdEl.style.borderBottom = '1px solid #333';
+        macdEl.style.borderRadius = '0';
+        macdEl.style.borderBottom = 'none';
+        
+        rsiEl.style.borderRadius = '0 0 8px 8px';
+        rsiEl.style.borderBottom = '1px solid #333';
         
         // Determine the last visible element
         let lastVisible = chartEl;
         if (showVolume) lastVisible = volumeEl;
         if (showMacd) lastVisible = macdEl;
+        if (showRsi) lastVisible = rsiEl;
         
         // Apply bottom radius to the last visible element
         if (lastVisible === chartEl) {
@@ -838,13 +1066,15 @@
         } else if (lastVisible === volumeEl) {
           volumeEl.style.borderRadius = '0 0 8px 8px';
           volumeEl.style.borderBottom = '1px solid #333';
+        } else if (lastVisible === macdEl) {
+          macdEl.style.borderRadius = '0 0 8px 8px';
+          macdEl.style.borderBottom = '1px solid #333';
         }
-        
-        // Adjust middle elements if needed (e.g. if Volume is hidden, MACD top border is fine)
       }
 
       document.getElementById('toggle-volume').addEventListener('change', updateChartLayout);
       document.getElementById('toggle-macd').addEventListener('change', updateChartLayout);
+      document.getElementById('toggle-rsi').addEventListener('change', updateChartLayout);
 
       // 回车键加载
       document.getElementById('symbol').addEventListener('keypress', (e) => {
@@ -859,15 +1089,18 @@
 
       // 页面加载完成后自动加载默认数据
       window.addEventListener('load', () => {
+        // Initial layout update
+        updateChartLayout();
         setTimeout(loadData, 500);
       });
 
-      // 响应式处理
+      // Window resize handler
       window.addEventListener('resize', () => {
         const width = document.getElementById('chart').clientWidth;
         chart.applyOptions({ width });
         volumeChart.applyOptions({ width });
         macdChart.applyOptions({ width });
+        rsiChart.applyOptions({ width });
       });
       
       } // 结束 initChart 函数
