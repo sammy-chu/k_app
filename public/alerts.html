@@ -119,72 +119,6 @@
             min-width: 120px;
         }
 
-        #volume-threshold {
-            background-color: #1a1a1a;
-            border: 1px solid #555;
-            border-radius: 4px;
-            padding: 8px 12px;
-            color: #ddd;
-            font-size: 14px;
-            width: 120px;
-        }
-
-        #volume-threshold:focus {
-            outline: none;
-            border-color: #007acc;
-        }
-
-        .save-btn, .reset-btn {
-            padding: 8px 16px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s;
-        }
-
-        .save-btn {
-            background-color: #007acc;
-            color: white;
-        }
-
-        .save-btn:hover {
-            background-color: #0099ff;
-        }
-
-        .reset-btn {
-            background-color: #666;
-            color: white;
-        }
-
-        .reset-btn:hover {
-            background-color: #777;
-        }
-
-        .config-status {
-            display: flex;
-            gap: 20px;
-            font-size: 13px;
-            color: #aaa;
-            flex-wrap: wrap;
-        }
-
-        #current-threshold {
-            color: #ddd;
-        }
-
-        #config-message {
-            color: #007acc;
-        }
-
-        #config-message.success {
-            color: #4caf50;
-        }
-
-        #config-message.error {
-            color: #f44336;
-        }
-
         .alerts-list {
             list-style: none;
             padding: 0;
@@ -254,14 +188,6 @@
         .amp-up { color: #26a69a; }      /* 上涨绿色 */
         .amp-down { color: #ef5350; }    /* 下跌红色 */
         .amp-flat { color: #888; }       /* 平盘灰色 */
-        .amp-volume { color: #ff9800; font-weight: bold; } /* 放量橙色 */
-        
-        /* 放量提醒的特殊背景 */
-        .volume-breakout-item {
-            background-color: rgba(255, 152, 0, 0.1);
-            border-left: 3px solid #ff9800;
-        }
-
         /* 响应式设计 */
         @media (max-width: 768px) {
             .alert-item {
@@ -285,32 +211,13 @@
         <div class="nav-links">
             <a href="/">首页</a>
             <a href="/alerts" style="background-color: #007acc; color: white;">价格提醒</a>
+            <a href="/volume-alerts">成交量提醒</a>
             <a href="/hills">山丘扫描</a>
             <a href="/hill-alerts">山丘提醒</a>
         </div>
 
         <div class="alerts-header">
             <h2 class="alerts-title">提醒列表（最近）</h2>
-        </div>
-
-        <!-- 配置面板 -->
-        <div class="config-panel">
-            <div class="config-header">
-                <h3>成交量过滤配置</h3>
-                <button id="toggle-config" class="toggle-btn">▼</button>
-            </div>
-            <div id="config-content" class="config-content">
-                <div class="config-row">
-                    <label for="volume-threshold">最小当日成交量：</label>
-                    <input type="number" id="volume-threshold" min="0" step="1000" placeholder="5000">
-                    <button id="save-config" class="save-btn">保存</button>
-                    <button id="reset-config" class="reset-btn">重置</button>
-                </div>
-                <div class="config-status">
-                    <span id="current-threshold">当前阈值: 加载中...</span>
-                    <span id="config-message"></span>
-                </div>
-            </div>
         </div>
 
         <!-- 振幅筛选面板 -->
@@ -389,16 +296,8 @@
                 return;
             }
 
-            // 过滤掉 volume_breakout 类型的提醒
-            const displayAlerts = alerts.filter(alert => alert.rule_id !== 'volume_breakout');
-
-            if (displayAlerts.length === 0) {
-                alertsList.innerHTML = '<li class="no-alerts">暂无提醒数据</li>';
-                return;
-            }
-
             // 应用振幅筛选
-            const filteredAlerts = applyAmplitudeFilter(displayAlerts);
+            const filteredAlerts = applyAmplitudeFilter(alerts);
             
             if (filteredAlerts.length === 0) {
                 alertsList.innerHTML = '<li class="no-alerts">没有符合筛选条件的提醒数据</li>';
@@ -406,20 +305,9 @@
             }
 
             alertsList.innerHTML = filteredAlerts.map(alert => {
-                const isVolumeBreakout = alert.rule_id === 'volume_breakout';
-                let amplitudeText, amplitudeClass;
-                
-                if (isVolumeBreakout) {
-                    // 放量突破显示倍数
-                    const ratio = parseFloat(alert.amplitude_pct).toFixed(1);
-                    amplitudeText = `🌋 放量 ${ratio}x`;
-                    amplitudeClass = 'amp-volume';
-                } else {
-                    // 价格振幅显示百分比
-                    const amplitude = (parseFloat(alert.amplitude_pct) * 100).toFixed(2);
-                    amplitudeText = `振幅 ${amplitude}%`;
-                    amplitudeClass = getAmplitudeClass(amplitude, alert.direction);
-                }
+                const amplitude = (parseFloat(alert.amplitude_pct) * 100).toFixed(2);
+                const amplitudeText = `振幅 ${amplitude}%`;
+                const amplitudeClass = getAmplitudeClass(amplitude, alert.direction);
 
                 const direction = getDirectionIndicator(alert.direction);
                 const time = formatBeijingTime(alert.created_at);
@@ -427,7 +315,7 @@
                 const close = parseFloat(alert.close).toFixed(4);
                 
                 return `
-                    <li class="alert-item ${isVolumeBreakout ? 'volume-breakout-item' : ''}">
+                    <li class="alert-item">
                         <span class="alert-symbol">${alert.symbol}</span>
                         <span class="alert-time">${time}</span>
                         <span class="alert-amplitude ${amplitudeClass}">${amplitudeText}</span>
@@ -464,11 +352,6 @@
             }
             
             return alerts.filter(alert => {
-                // 放量提醒不受振幅阈值过滤影响，总是显示
-                if (alert.rule_id === 'volume_breakout') {
-                    return true;
-                }
-
                 const amplitude = parseFloat(alert.amplitude_pct);
                 
                 // 健壮性检查：处理无效的amplitude_pct值
@@ -519,9 +402,6 @@
             
             // 初始化振幅筛选配置
             initAmplitudeFilter();
-            
-            // 初始化配置面板
-            initConfigPanel();
             
             // 立即加载一次数据
             loadAlerts();
@@ -660,144 +540,6 @@
             updateFilterStatus();
         }
 
-        // 配置面板相关功能
-        function initConfigPanel() {
-            const toggleBtn = document.getElementById('toggle-config');
-            const configContent = document.getElementById('config-content');
-            const saveBtn = document.getElementById('save-config');
-            const resetBtn = document.getElementById('reset-config');
-            const volumeInput = document.getElementById('volume-threshold');
-            const currentThresholdSpan = document.getElementById('current-threshold');
-            const messageSpan = document.getElementById('config-message');
-
-            // 折叠/展开功能
-            toggleBtn.addEventListener('click', function() {
-                const isCollapsed = configContent.classList.contains('collapsed');
-                if (isCollapsed) {
-                    configContent.classList.remove('collapsed');
-                    toggleBtn.textContent = '▼';
-                } else {
-                    configContent.classList.add('collapsed');
-                    toggleBtn.textContent = '▶';
-                }
-            });
-
-            // 加载当前配置
-            loadCurrentConfig();
-
-            // 保存配置
-            saveBtn.addEventListener('click', async function() {
-                const threshold = parseInt(volumeInput.value);
-                if (isNaN(threshold) || threshold < 0) {
-                    showMessage('请输入有效的非负整数', 'error');
-                    return;
-                }
-
-                try {
-                    saveBtn.disabled = true;
-                    saveBtn.textContent = '保存中...';
-                    
-                    const response = await fetch('/api/config/volume-threshold', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ threshold: threshold })
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const result = await response.json();
-                    if (result.success) {
-                        showMessage(`配置已保存 (${result.previous} → ${result.current})`, 'success');
-                        updateCurrentThreshold(result.current);
-                        // 重新加载alerts数据以反映新的阈值
-                        loadAlerts();
-                    } else {
-                        throw new Error('保存失败');
-                    }
-                } catch (error) {
-                    console.error('Error saving config:', error);
-                    showMessage('保存失败，请稍后重试', 'error');
-                } finally {
-                    saveBtn.disabled = false;
-                    saveBtn.textContent = '保存';
-                }
-            });
-
-            // 重置配置
-            resetBtn.addEventListener('click', async function() {
-                try {
-                    resetBtn.disabled = true;
-                    resetBtn.textContent = '重置中...';
-                    
-                    const response = await fetch('/api/config/volume-threshold', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({ threshold: 5000 }) // 默认值
-                    });
-
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const result = await response.json();
-                    if (result.success) {
-                        volumeInput.value = result.current;
-                        showMessage(`已重置为默认值 (${result.previous} → ${result.current})`, 'success');
-                        updateCurrentThreshold(result.current);
-                        // 重新加载alerts数据以反映新的阈值
-                        loadAlerts();
-                    } else {
-                        throw new Error('重置失败');
-                    }
-                } catch (error) {
-                    console.error('Error resetting config:', error);
-                    showMessage('重置失败，请稍后重试', 'error');
-                } finally {
-                    resetBtn.disabled = false;
-                    resetBtn.textContent = '重置';
-                }
-            });
-
-            // 加载当前配置
-            async function loadCurrentConfig() {
-                try {
-                    const response = await fetch('/api/config/volume-threshold');
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-
-                    const config = await response.json();
-                    volumeInput.value = config.current;
-                    updateCurrentThreshold(config.current);
-                } catch (error) {
-                    console.error('Error loading config:', error);
-                    currentThresholdSpan.textContent = '当前阈值: 加载失败';
-                }
-            }
-
-            // 更新当前阈值显示
-            function updateCurrentThreshold(threshold) {
-                currentThresholdSpan.textContent = `当前阈值: ${threshold.toLocaleString()}`;
-            }
-
-            // 显示消息
-            function showMessage(message, type = 'info') {
-                messageSpan.textContent = message;
-                messageSpan.className = type;
-                
-                // 3秒后清除消息
-                setTimeout(() => {
-                    messageSpan.textContent = '';
-                    messageSpan.className = '';
-                }, 3000);
-            }
-        }
     </script>
 </body>
 </html>

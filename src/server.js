@@ -14,8 +14,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// 全局配置变量 - 成交量阈�?
-let currentVolumeThreshold = Number(process.env.DAILY_VOLUME_MIN || 5000);
+// 全局配置变量
 
 // 数据库连接池配置
 const pool = new Pool({
@@ -150,6 +149,7 @@ app.get('/api/ohlcv', async (req, res) => {
   }
 });
 
+
 // 数据库测试路�?
 app.get('/api/test-db', async (req, res) => {
   try {
@@ -195,97 +195,21 @@ app.get('/api/alerts', async (req, res) => {
     await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
     const since = req.query.since || null;
     const limit = Math.min(Number(req.query.limit || 50), 200);
-    
-    // 读取阈值（使用动态配置）
-    const MIN_VOL = currentVolumeThreshold;
+    const ruleId = req.query.rule_id || 'amplitude_1pct';
 
     const sql = `
-      WITH today AS (
-        SELECT
-          -- 以上海时区的当日开?结束，转换为UTC以匹配库中时间列
-          (date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) AT TIME ZONE 'UTC') AS start_utc,
-          ((date_trunc('day', (now() AT TIME ZONE 'Asia/Shanghai')) + interval '1 day') AT TIME ZONE 'UTC') AS end_utc
-      ),
-      combined_alerts AS (
-         SELECT symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at
-         FROM k_alerts
-         WHERE bucket >= (SELECT start_utc FROM today)
-         
-         UNION ALL
-         
-         SELECT symbol, bucket_time AS bucket, NULL AS open, NULL AS high, NULL AS low, NULL AS close, breakout_ratio AS amplitude_pct, 1 AS direction, 'volume_breakout' AS rule_id, created_at
-         FROM k_hill_alerts
-         WHERE bucket_time >= (SELECT start_utc FROM today)
-       )
-       SELECT a.symbol, a.bucket, a.open, a.high, a.low, a.close, a.amplitude_pct, a.direction, a.rule_id, a.created_at,
-             v.vol as current_volume
-      FROM combined_alerts a
-      JOIN today t ON true
-      LEFT JOIN LATERAL (
-        SELECT SUM(tr.size) AS vol
-        FROM tos_trades tr
-        WHERE tr.symbol = a.symbol
-          AND tr.received_at >= t.start_utc 
-          AND tr.received_at < t.end_utc
-          AND COALESCE(tr.size::numeric, 0) > 0
-      ) v ON true
-      WHERE ($1::timestamptz IS NULL OR a.created_at >= $1::timestamptz)
-        AND a.bucket >= t.start_utc
-        AND COALESCE(v.vol, 0) >= $2
-      ORDER BY a.created_at DESC
-      LIMIT $3
+      SELECT symbol, bucket, open, high, low, close, amplitude_pct, direction, rule_id, created_at
+      FROM k_alerts
+      WHERE rule_id = $3
+        AND ($1::timestamptz IS NULL OR created_at >= $1::timestamptz)
+      ORDER BY created_at DESC
+      LIMIT $2
     `;
-    const { rows } = await pool.query(sql, [since, MIN_VOL, limit]);
+    const { rows } = await pool.query(sql, [since, limit, ruleId]);
     res.json(rows);
   } catch (e) {
     console.error('alerts query failed:', e);
     res.status(500).json({ error: 'alerts query failed' });
-  }
-});
-
-// 获取当前成交量阈值配�?
-app.get('/api/config/volume-threshold', (req, res) => {
-  try {
-    res.json({
-      current: currentVolumeThreshold,
-      default: Number(process.env.DAILY_VOLUME_MIN || 5000),
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Get volume threshold config failed:', error);
-    res.status(500).json({ error: 'Failed to get configuration' });
-  }
-});
-
-// 设置成交量阈值配�?
-app.post('/api/config/volume-threshold', express.json(), (req, res) => {
-  try {
-    const { threshold } = req.body;
-    
-    // 基本验证
-    if (typeof threshold !== 'number' || threshold < 0) {
-      return res.status(400).json({ 
-        error: 'Invalid threshold value. Must be a non-negative number.' 
-      });
-    }
-    
-    // 保存之前的�?
-    const previousThreshold = currentVolumeThreshold;
-    
-    // 更新全局变量
-    currentVolumeThreshold = threshold;
-    
-    console.log(`Volume threshold updated: ${threshold}`);
-    
-    res.json({
-      success: true,
-      previous: previousThreshold,
-      current: threshold,
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Set volume threshold config failed:', error);
-    res.status(500).json({ error: 'Failed to set configuration' });
   }
 });
 
@@ -325,7 +249,198 @@ app.get('/api/hill-alerts', async (req, res) => {
 
 // Alert monitoring configuration and functions
 const ALERT_THRESHOLD_PCT = Number(process.env.ALERT_THRESHOLD_PCT || 0.01);
-const DAILY_VOLUME_MIN = Number(process.env.DAILY_VOLUME_MIN || 5000);
+
+// 辅助函数：日期格式校验
+const isValidDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d);
+
+app.post('/api/volume/daily-refresh', async (req, res) => {
+  const start = String(req.query.start || '').trim();
+  const end = String(req.query.end || '').trim();
+  
+  // 1. 参数校验
+  if (!isValidDate(start) || !isValidDate(end)) {
+    return res.status(400).json({ error: 'invalid_date_format', message: 'Use YYYY-MM-DD' });
+  }
+
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    
+    // 2. 执行 Upsert (存在更新，不存在插入)
+    const sql = `
+      INSERT INTO tos_daily_volume(symbol, trade_date, daily_volume, updated_at)
+      SELECT symbol,
+             DATE(CASE
+                    WHEN trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN trim(trade_time)::timestamp
+                    ELSE created_at
+                  END) AS trade_date,
+             SUM(size) AS daily_volume,
+             now()
+      FROM tos_trades
+      WHERE DATE(CASE
+                   WHEN trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN trim(trade_time)::timestamp
+                   ELSE created_at
+                 END) >= $1::date AND DATE(CASE
+                   WHEN trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN trim(trade_time)::timestamp
+                   ELSE created_at
+                 END) <= $2::date
+      GROUP BY symbol, trade_date
+      ON CONFLICT (symbol, trade_date)
+      DO UPDATE SET daily_volume = EXCLUDED.daily_volume, updated_at = now();`;
+      
+    await pool.query(sql, [start, end]);
+    res.json({ ok: true, start, end, timestamp: new Date() });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'db_error', message: e.message });
+  }
+});
+
+app.get('/api/volume/summary', async (req, res) => {
+  const start = String(req.query.start || '').trim();
+  const end = String(req.query.end || '').trim();
+  const order = String(req.query.order || 'total').trim();
+  const format = String(req.query.format || 'json').trim();
+
+  if (!isValidDate(start) || !isValidDate(end)) {
+    return res.status(400).json({ error: 'invalid_date_format' });
+  }
+
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  
+  // 1. 动态排序字段
+  const orderBy = order === 'avg' ? 'avg_volume' : 'total_volume';
+  
+  // 2. 查询汇总表 (性能极快)
+  const sql = `
+    SELECT symbol,
+           SUM(daily_volume) AS total_volume,
+           ROUND(AVG(daily_volume), 2) AS avg_volume
+    FROM tos_daily_volume
+    WHERE trade_date >= $1::date AND trade_date <= $2::date
+    GROUP BY symbol
+    ORDER BY ${orderBy} DESC;`;
+
+  const { rows } = await pool.query(sql, [start, end]);
+
+  // 3. CSV 导出处理
+  if (format === 'csv') {
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', 'attachment; filename="volume_summary.csv"');
+    const header = 'symbol,total_volume,avg_volume\n';
+    const body = rows.map(r => `${r.symbol},${r.total_volume},${r.avg_volume}`).join('\n');
+    return res.send(header + body);
+  }
+
+  return res.json(rows);
+});
+
+// 历史均量 (查汇总表)
+app.get('/api/volume/avg-daily', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const start = String(req.query.start || '').trim();
+  const end = String(req.query.end || '').trim();
+  
+  if (!symbol || !isValidDate(start) || !isValidDate(end)) return res.status(400).json({ error: 'invalid_params' });
+  
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  
+  const sql = `
+    SELECT COALESCE(AVG(daily_volume), 0) AS avg_daily_vol
+    FROM tos_daily_volume
+    WHERE symbol = $1 AND trade_date >= $2::date AND trade_date < $3::date;`;
+    
+  const { rows } = await pool.query(sql, [symbol, start, end]);
+  res.json(rows[0]);
+});
+
+// 今日累积 (查明细表 - 实时)
+app.get('/api/volume/cumulative', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const date = String(req.query.date || '').trim(); // 通常是今日
+  
+  if (!symbol || !isValidDate(date)) return res.status(400).json({ error: 'invalid_params' });
+  
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  
+  const sql = `
+    SELECT COALESCE(SUM(size), 0) AS cumulative_vol
+    FROM tos_trades
+    WHERE symbol = $1 AND (
+      (trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND trim(trade_time)::timestamp >= $2::timestamp AND trim(trade_time)::timestamp < ($2::date + INTERVAL '1 day'))
+      OR
+      (trim(trade_time) !~ '^\\d{4}-\\d{2}-\\d{2}' AND created_at >= $2::date AND created_at < ($2::date + INTERVAL '1 day'))
+    );`;
+    
+  const { rows } = await pool.query(sql, [symbol, date]);
+  res.json(rows[0]);
+});
+
+app.post('/api/alerts/daily-volume-pct/scan', async (req, res) => {
+  const { symbol, date, start, end, threshold } = req.query;
+  
+  if (!symbol || !isValidDate(date) || !isValidDate(start) || !isValidDate(end) || !threshold) {
+    return res.status(400).json({ error: 'params_missing_or_invalid' });
+  }
+  
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
+  // 1. 获取历史均量
+  const avgRes = await pool.query(
+    `SELECT COALESCE(AVG(daily_volume), 0) AS avg FROM tos_daily_volume 
+     WHERE symbol = $1 AND trade_date >= $2::date AND trade_date < $3::date`,
+    [symbol, start, end]
+  );
+  const avg = Number(avgRes.rows[0].avg || 0);
+  
+  // 2. 获取今日累积
+  const cumRes = await pool.query(
+    `SELECT COALESCE(SUM(size), 0) AS val, date_trunc('minute', now()) as now_bucket 
+     FROM tos_trades 
+     WHERE symbol = $1 AND (
+       (trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND trim(trade_time)::timestamp >= $2::timestamp AND trim(trade_time)::timestamp < ($2::date + INTERVAL '1 day'))
+       OR
+       (trim(trade_time) !~ '^\\d{4}-\\d{2}-\\d{2}' AND created_at >= $2::date AND created_at < ($2::date + INTERVAL '1 day'))
+     )`,
+    [symbol, date]
+  );
+  const cum = Number(cumRes.rows[0].val || 0);
+  
+  // 3. 计算与判断
+  const pct = avg > 0 ? cum / avg : 0;
+  if (pct < Number(threshold)) {
+    return res.json({ triggered: false, pct, cum, avg });
+  }
+  
+  // 4. 写入提醒 (幂等) - 写入新表 k_volume_alerts
+  const insertSql = `
+    INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (symbol, bucket) DO NOTHING
+    RETURNING id;`;
+    
+  const tx = await pool.query(insertSql, [symbol, cumRes.rows[0].now_bucket, pct, cum, avg]);
+  res.json({ triggered: tx.rowCount > 0, pct, bucket: cumRes.rows[0].now_bucket });
+});
+
+// 新增：成交量提醒查询接口
+app.get('/api/volume-alerts-data', async (req, res) => {
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    const limit = Math.min(Number(req.query.limit || 50), 200);
+
+    const sql = `
+      SELECT symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol, created_at
+      FROM k_volume_alerts
+      ORDER BY created_at DESC
+      LIMIT $1
+    `;
+    const { rows } = await pool.query(sql, [limit]);
+    res.json(rows);
+  } catch (e) {
+    console.error('volume alerts query failed:', e);
+    res.status(500).json({ error: 'query failed' });
+  }
+});
 
 async function scanAndInsertAlerts() {
   try {
@@ -405,100 +520,6 @@ async function scanAndInsertAlerts() {
   }
 }
 
-async function scanVolumeBreakouts() {
-  try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
-
-    // 计算当前分钟（或上一分钟）的放量情况
-    // 注意：我们需要确保当前分钟已经结束或者数据足够，为了稳健起见，我们检测"上一分钟"
-    const sql = `
-      WITH params AS (
-        SELECT 
-           date_trunc('minute', now() AT TIME ZONE 'Asia/Shanghai') - INTERVAL '1 minute' AS target_bucket
-      ),
-      raw_data AS (
-        SELECT 
-          t.symbol,
-          date_trunc('minute', t.received_at) AS bucket,
-          SUM(t.size) as volume,
-          AVG(t.price) as avg_price,
-          -- 获取开盘收盘价用于插入 k_alerts 表
-          (ARRAY_AGG(t.price ORDER BY t.received_at ASC))[1] as open,
-          MAX(t.price) as high,
-          MIN(t.price) as low,
-          (ARRAY_AGG(t.price ORDER BY t.received_at DESC))[1] as close
-        FROM tos_trades t
-        JOIN user_symbols u ON t.symbol = u.symbol
-        WHERE 
-          t.received_at >= (now() AT TIME ZONE 'Asia/Shanghai' - INTERVAL '30 minutes')
-        GROUP BY 1, 2
-      ),
-      stats AS (
-         SELECT
-           s.symbol,
-           s.bucket,
-           s.volume,
-           s.avg_price,
-           s.open, s.high, s.low, s.close,
-           -- 计算从今日开盘到当前时间的加权平均成交量 (Baseline - WMA)
-           (
-             SELECT SUM(sub.v * sub.r) / NULLIF(SUM(sub.r), 0)
-             FROM (
-               SELECT rd.volume as v, ROW_NUMBER() OVER (ORDER BY rd.bucket ASC) as r
-               FROM raw_data rd
-               WHERE rd.symbol = s.symbol 
-                 AND rd.volume > 0  -- 剔除成交量为0的数据
-                 AND rd.bucket < s.bucket  -- 当前时间之前的数据
-                 AND date_trunc('day', rd.bucket AT TIME ZONE 'Asia/Shanghai') = 
-                     date_trunc('day', s.bucket AT TIME ZONE 'Asia/Shanghai')  -- 同一天
-             ) sub
-           ) as baseline,
-           -- 获取前两分钟的量
-           LAG(s.volume, 1) OVER (PARTITION BY s.symbol ORDER BY s.bucket) as v_m1,
-           LAG(s.volume, 2) OVER (PARTITION BY s.symbol ORDER BY s.bucket) as v_m2
-         FROM raw_data s
-      ),
-      candidates AS (
-        SELECT s.*,
-          CASE WHEN s.baseline > 0 THEN s.volume / s.baseline ELSE 0 END as ratio,
-          (
-            SELECT json_agg(json_build_object('t', r.bucket, 'v', r.volume) ORDER BY r.bucket)
-            FROM raw_data r
-            WHERE r.symbol = s.symbol 
-              AND r.bucket >= s.bucket - INTERVAL '15 minutes'
-              AND r.bucket <= s.bucket + INTERVAL '15 minutes'
-          ) as hill_data
-        FROM stats s
-        WHERE s.bucket = (SELECT target_bucket FROM params)
-      )
-      INSERT INTO k_hill_alerts(symbol, bucket_time, volume, baseline_volume, breakout_ratio, hill_data, created_at)
-      SELECT 
-        symbol, 
-        (bucket AT TIME ZONE 'Asia/Shanghai'), 
-        volume,
-        baseline,
-        ratio,
-        hill_data,
-        now()
-      FROM candidates
-      WHERE 
-        volume > 1000                  -- 最小成交量
-        AND volume * avg_price > 50000 -- 最小成交额
-        AND ratio > 3.0                -- 放量倍数 > 3倍
-        AND volume > v_m1              -- 大于前1分钟
-        AND volume > v_m2              -- 大于前2分钟
-      ON CONFLICT (symbol, bucket_time) DO NOTHING
-      RETURNING symbol, bucket_time, breakout_ratio;
-    `;
-
-    const { rows } = await pool.query(sql);
-    if (rows.length > 0) {
-      console.log(`[Volume Monitor] Detected ${rows.length} breakouts:`, rows.map(r => `${r.symbol}(${Number(r.breakout_ratio).toFixed(1)}x)`).join(', '));
-    }
-  } catch (e) {
-    console.error('scanVolumeBreakouts error:', e.message);
-  }
-}
 
 function startAlertMonitor() {
   const runScan = async (name, fn, interval) => {
@@ -524,11 +545,6 @@ function startAlertMonitor() {
   // setInterval(scanAndInsertAlerts, 5000);
   runScan('PriceMonitor', scanAndInsertAlerts, 5000);
 
-  // 2. 放量突破监控 (新增的)
-  // scanVolumeBreakouts();
-  // setInterval(scanVolumeBreakouts, 10000);
-  runScan('VolumeMonitor', scanVolumeBreakouts, 10000);
-  
   // console.log('[ALERT monitor] Monitoring temporarily disabled for debugging');
 }
 
@@ -539,6 +555,12 @@ app.use(express.static(path.join(__dirname, '../public')));
 app.get('/alerts', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/alerts.html'));
 });
+
+// 成交量提醒页面路由
+app.get('/volume-alerts', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/volume-alerts.html'));
+});
+
 
 // 山丘形态页面路由
 app.get('/hills', (req, res) => {
@@ -553,7 +575,6 @@ app.get('/hill-alerts', (req, res) => {
 // 在静态服务与监听之前启动监控（或?listen 之后皆可?
 startAlertMonitor();
 console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
-console.log(`[DAILY_VOLUME_MIN] configured threshold: ${DAILY_VOLUME_MIN}`);
 
 const PORT = process.env.PORT || 8889;
 const HOST = process.env.HOST || '0.0.0.0';

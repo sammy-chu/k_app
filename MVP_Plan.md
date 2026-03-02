@@ -444,3 +444,180 @@ function startPolling() {
 - 输入 `symbol` 与日期后，前端能绘制当日 1m K线，时间轴连续，最新价标签显示。
 - 后端 API 在合理时间返回（< 1–2s，视数据量而定）。
 - 所有步骤均有可重复的验证命令与回滚策略。
+
+---
+
+## 迭代 5：当日成交量百分比提醒（MVP）
+
+- 目标：当日累积成交量达到近 D 个交易日平均成交量的 X% 时触发提醒，写入 `market_data.k_alerts` 并在提醒页面展示。
+- 参考文件：
+  - [server.js](file:///c:/Users/sami/Desktop/k_app/src/server.js)
+  - [alerts.sql](file:///c:/Users/sami/Desktop/k_app/src/sql/alerts.sql)
+  - [alerts.html](file:///c:/Users/sami/Desktop/k_app/public/alerts.html)
+
+### Git 工作流（每步都可套用）
+- 干净开始：`git status -sb` 确认无未提交；必要时 `git reset --hard`。
+- 建分支：`git switch -c feature/daily-volume-pct-alert`。
+- 失败回滚：`git reset --hard` 或回到上一个提交。
+
+### 步骤 1：计算近 D 日平均成交量（后端查询）
+- 要做什么：提供查询获取某 symbol 近 D 个交易日的“每日总成交量”均值 `avg_daily_vol`。
+- 需要修改的文件：`src/server.js` 新增路由 `/api/volume/avg-daily`（MVP可直接实现为查询）。
+- 代码片段：
+```js
+app.get('/api/volume/avg-daily', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const days = Number(req.query.days || 5);
+  if (!symbol || !days) return res.status(400).json({ error: 'symbol and days required' });
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  const sql = `
+    WITH d AS (
+      SELECT DATE(ts) AS day, SUM(size) AS vol
+      FROM tos_trades
+      WHERE symbol = $1
+      GROUP BY day
+      ORDER BY day DESC
+      LIMIT $2
+    )
+    SELECT COALESCE(AVG(vol), 0) AS avg_daily_vol FROM d;`;
+  const { rows } = await pool.query(sql, [symbol, days]);
+  res.json(rows[0]);
+});
+```
+- 如何验证：
+  - 启动服务：`npm run start`。
+  - `curl "http://localhost:3000/api/volume/avg-daily?symbol=AMZN.BL&days=5"`。
+  - 预期：返回 `{ "avg_daily_vol": <number> }`，数值与数据库手算接近。
+- DoD：
+  - 常见活跃标的能在合理时间返回均值；参数校验健壮。
+
+### 步骤 2：计算当日累积成交量（实时）
+- 要做什么：查询当日从开盘至当前时刻的累积成交量 `cumulative_vol`。
+- 需要修改的文件：`src/server.js` 新增路由 `/api/volume/cumulative`。
+- 代码片段：
+```js
+app.get('/api/volume/cumulative', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const date = String(req.query.date || '').trim();
+  if (!symbol || !date) return res.status(400).json({ error: 'symbol and date required' });
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  const sql = `
+    WITH p AS (
+      SELECT ($2::date)::timestamptz AS day_start,
+             (($2::date) + INTERVAL '1 day')::timestamptz AS day_end
+    )
+    SELECT COALESCE(SUM(size), 0) AS cumulative_vol
+    FROM tos_trades t, p
+    WHERE t.symbol = $1 AND t.ts >= p.day_start AND t.ts < LEAST(p.day_end, now());`;
+  const { rows } = await pool.query(sql, [symbol, date]);
+  res.json(rows[0]);
+});
+```
+- 如何验证：
+  - `curl "http://localhost:3000/api/volume/cumulative?symbol=AMZN.BL&date=2025-10-07"`。
+  - 预期：返回 `{ "cumulative_vol": <number> }`，与分钟级 `v` 累加一致。
+- DoD：
+  - 活跃交易日返回非零累积值；空交易日返回 0。
+
+### 步骤 3：阈值检测并写入提醒
+- 要做什么：当 `cumulative_vol / avg_daily_vol >= X` 且首次跨越阈值时，写入 `market_data.k_alerts`。
+- 需要修改的文件：
+  - `src/server.js` 新增路由 `/api/alerts/daily-volume-pct/scan` 触发一次扫描（MVP用手动触发）。
+  - 不改动表结构，使用现有唯一键（`symbol,bucket,rule_id`）。
+- 代码片段：
+```js
+app.post('/api/alerts/daily-volume-pct/scan', async (req, res) => {
+  const symbol = String(req.query.symbol || '').trim();
+  const date = String(req.query.date || '').trim();
+  const days = Number(req.query.days || 5);
+  const thresholds = String(req.query.thresholds || '0.5,0.8,1.0')
+    .split(',').map(s => Number(s)).filter(n => n > 0);
+  if (!symbol || !date || thresholds.length === 0) return res.status(400).json({ error: 'params required' });
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  const { rows: avgRows } = await pool.query(
+    `WITH d AS (
+       SELECT DATE(ts) AS day, SUM(size) AS vol
+       FROM tos_trades WHERE symbol = $1
+       GROUP BY day ORDER BY day DESC LIMIT $2
+     ) SELECT COALESCE(AVG(vol),0) AS avg_daily_vol FROM d;`,
+    [symbol, days]
+  );
+  const avg = Number(avgRows[0].avg_daily_vol || 0);
+  const { rows: cumRows } = await pool.query(
+    `WITH p AS (
+       SELECT ($2::date)::timestamptz AS day_start,
+              (($2::date) + INTERVAL '1 day')::timestamptz AS day_end
+     ) SELECT COALESCE(SUM(size),0) AS cumulative_vol,
+              date_trunc('minute', COALESCE(MAX(ts), now())) AS bucket
+     FROM tos_trades t, p
+     WHERE t.symbol=$1 AND t.ts >= p.day_start AND t.ts < LEAST(p.day_end, now());`,
+    [symbol, date]
+  );
+  const cum = Number(cumRows[0].cumulative_vol || 0);
+  const bucket = cumRows[0].bucket;
+  const pct = avg > 0 ? cum / avg : 0;
+  const hit = thresholds.filter(x => pct >= x);
+  if (hit.length === 0) return res.json({ triggered: false, pct });
+  const txs = await pool.query(
+    `INSERT INTO market_data.k_alerts(symbol,bucket,open,high,low,close,amplitude_pct,direction,rule_id)
+     SELECT $1, $2, 0, 0, 0, 0, $3, 1, 'daily_volume_pct'
+     ON CONFLICT (symbol,bucket,rule_id) DO NOTHING
+     RETURNING id;`,
+    [symbol, bucket, pct]
+  );
+  res.json({ triggered: txs.rowCount > 0, pct, bucket });
+});
+```
+- 如何验证：
+  - 启动服务：`npm run start`。
+  - `curl -X POST "http://localhost:3000/api/alerts/daily-volume-pct/scan?symbol=AMZN.BL&date=2025-10-07&days=5&thresholds=0.5,0.8,1.0"`。
+  - `psql` 检查 `market_data.k_alerts` 是否新增 `rule_id='daily_volume_pct'` 行。
+- DoD：
+  - 到达阈值时返回 `triggered=true` 并成功插入一行；重复触发同分钟不会重复插入。
+
+### 步骤 4：提醒页面展示
+- 要做什么：在提醒列表展示该新规则为百分比文案。
+- 需要修改的文件：`public/alerts.html` 渲染逻辑新增 `daily_volume_pct` 分支。
+- 代码片段：
+```js
+const isDailyPct = alert.rule_id === 'daily_volume_pct';
+if (isDailyPct) {
+  const pctText = (parseFloat(alert.amplitude_pct) * 100).toFixed(0) + '%';
+  amplitudeText = '当日量达均量 ' + pctText;
+  amplitudeClass = 'amp-volume';
+}
+```
+- 如何验证：
+  - 浏览器访问：`http://localhost:3000/alerts`。
+  - 预期：当有 `daily_volume_pct` 数据时，显示“当日量达均量 xx%”。
+- DoD：
+  - 列表正确展示新规则，样式与现有提醒一致；无该规则时页面正常。
+
+### 步骤 5：配置参数（可选）
+- 要做什么：支持 D 与阈值数组配置，MVP 可通过 URL 参数或简易后端配置接口。
+- 需要修改的文件：
+  - `public/alerts.html` 增加输入框或读取 URL 参数 `d`、`pct`。
+  - `src/server.js` 增加 `/api/config/daily-volume-pct`（可选）。
+- 代码片段（URL 读取示例）：
+```js
+const url = new URL(window.location);
+const dParam = Number(url.searchParams.get('d') || 5);
+const pctParam = (url.searchParams.get('pct') || '0.8').split(',').map(s => Number(s));
+```
+- 如何验证：
+  - 浏览器：`http://localhost:3000/alerts?d=5&pct=0.5,0.8,1.0`。
+  - 预期：渲染逻辑按参数生效。
+- DoD：
+  - 参数可读可用；非法参数回退默认值。
+
+### 步骤 6：回测与稳定性
+- 要做什么：对历史交易日进行手动触发扫描，核对触发点的准确性。
+- 验证：
+  - 多次 `curl -X POST` 在不同阈值与日期下测试；查询 DB 校验插入。
+  - 若异常日影响均值，调整 D 或采用中位数策略（后续迭代）。
+- DoD：
+  - 典型活跃标的在 50%/80%/100% 阈值附近触发合理；未触发不插入。
+
+### 完成与回滚
+- 完成：`git add -A && git commit -m "feat: daily volume pct alert MVP"`。
+- 回滚：`git reset --hard` 恢复到上一个稳定提交。

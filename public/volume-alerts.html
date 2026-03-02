@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>成交量提醒列表</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #ddd;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .nav-links a {
+            color: #007acc;
+            text-decoration: none;
+            padding: 8px 16px;
+            margin: 0 10px;
+            border: 1px solid #007acc;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+
+        .nav-links a:hover {
+            background-color: #007acc;
+            color: white;
+        }
+
+        .alerts-header {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .alerts-title {
+            font-size: 1.5em;
+            color: #ddd;
+            font-weight: normal;
+        }
+
+        /* 配置面板样式 */
+        .config-panel {
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .config-header {
+            background-color: #333;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .config-header h3 {
+            margin: 0;
+            font-size: 1.1em;
+            color: #ddd;
+            font-weight: normal;
+        }
+
+        .toggle-btn {
+            background: none;
+            border: none;
+            color: #007acc;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px;
+            transition: transform 0.2s;
+        }
+
+        .toggle-btn:hover {
+            color: #0099ff;
+        }
+
+        .config-content {
+            padding: 16px;
+            display: block;
+        }
+
+        .config-content.collapsed {
+            display: none;
+        }
+
+        .config-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .config-row label {
+            color: #ddd;
+            min-width: 120px;
+        }
+
+        .alerts-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .alert-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #2a2a2a;
+            font-size: 14px;
+            color: #ddd;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .alert-item:last-child {
+            border-bottom: none;
+        }
+
+        .alert-symbol {
+            font-weight: bold;
+            color: #ffffff;
+            min-width: 80px;
+        }
+
+        .alert-time {
+            color: #888;
+            min-width: 120px;
+            font-size: 13px;
+        }
+
+        .alert-amplitude {
+            font-weight: bold;
+            min-width: 120px; /* 稍微宽一点以容纳"量比 xxx%" */
+        }
+
+        .alert-direction {
+            min-width: 20px;
+            font-size: 16px;
+        }
+
+        .alert-info {
+            color: #888;
+            font-size: 13px;
+            flex: 1;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #ff6b6b;
+        }
+
+        .no-alerts {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        /* 振幅/量比颜色 */
+        .amp-up { color: #26a69a; }      /* 绿色 */
+        .amp-down { color: #ef5350; }    /* 红色 */
+        .amp-flat { color: #888; }       /* 灰色 */
+        
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .alert-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+                padding: 12px 0;
+            }
+
+            .alert-symbol,
+            .alert-time,
+            .alert-amplitude,
+            .alert-direction {
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-links">
+            <a href="/">首页</a>
+            <a href="/alerts">价格提醒</a>
+            <a href="/volume-alerts" style="background-color: #007acc; color: white;">成交量提醒</a>
+            <a href="/hills">山丘扫描</a>
+            <a href="/hill-alerts">山丘提醒</a>
+        </div>
+
+        <div class="alerts-header">
+            <h2 class="alerts-title">成交量提醒列表（最近）</h2>
+        </div>
+
+        <!-- 筛选面板 -->
+        <div class="config-panel">
+            <div class="config-header">
+                <h3>筛选配置</h3>
+                <button id="toggle-config" class="toggle-btn">▼</button>
+            </div>
+            <div id="config-content" class="config-content">
+                <div class="config-row">
+                    <label for="threshold">最小量比阈值：</label>
+                    <input type="number" id="threshold" min="0" step="0.1" placeholder="0.5" value="0.5">
+                    <label for="enable-filter">
+                        <input type="checkbox" id="enable-filter" checked>
+                        启用筛选
+                    </label>
+                </div>
+                <div class="config-status">
+                    <span id="filter-status">筛选状态: 已启用，阈值 0.5</span>
+                </div>
+            </div>
+        </div>
+
+        <ul class="alerts-list" id="alerts-list">
+            <li class="loading">正在加载提醒数据...</li>
+        </ul>
+    </div>
+
+    <script>
+        // 格式化北京时间 - 简化格式
+        function formatBeijingTime(isoString) {
+            const date = new Date(isoString);
+            return date.toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).replace(/\//g, '/');
+        }
+
+        // 获取方向指示器 (成交量通常关注是否达标，这里方向固定为1，用箭头表示"达到")
+        function getDirectionIndicator(direction) {
+            // 成交量提醒 direction 默认为 1
+            return '⚡'; 
+        }
+
+        // 获取样式类
+        function getClass(ratio) {
+            // 量比大于1显示绿色(显著)，否则灰色
+            if (ratio >= 1) return 'amp-up';
+            return 'amp-flat';
+        }
+
+        // 渲染提醒列表
+        function renderAlerts(alerts) {
+            const alertsList = document.getElementById('alerts-list');
+            
+            if (!alerts || alerts.length === 0) {
+                alertsList.innerHTML = '<li class="no-alerts">暂无提醒数据</li>';
+                return;
+            }
+
+            // 应用筛选
+            const filteredAlerts = applyFilter(alerts);
+            
+            if (filteredAlerts.length === 0) {
+                alertsList.innerHTML = '<li class="no-alerts">没有符合筛选条件的提醒数据</li>';
+                return;
+            }
+
+            alertsList.innerHTML = filteredAlerts.map(alert => {
+                // amplitude_pct 在这里存储的是 量比 (ratio)
+                const ratio = parseFloat(alert.volume_ratio);
+                const ratioText = `量比 ${(ratio * 100).toFixed(0)}%`;
+                const ratioClass = getClass(ratio);
+
+                const direction = getDirectionIndicator(1); // 默认方向
+                const time = formatBeijingTime(alert.created_at);
+                
+                return `
+                    <li class="alert-item">
+                        <span class="alert-symbol">${alert.symbol}</span>
+                        <span class="alert-time">${time}</span>
+                        <span class="alert-amplitude ${ratioClass}">${ratioText}</span>
+                        <span class="alert-direction">${direction}</span>
+                        <span class="alert-info">
+                            当前量: ${Number(alert.current_cum_vol).toLocaleString()} / 
+                            均量: ${Number(alert.avg_daily_vol).toLocaleString()}
+                        </span>
+                    </li>
+                `;
+            }).join('');
+        }
+
+        // 应用筛选
+        function applyFilter(alerts) {
+            const enableFilter = document.getElementById('enable-filter').checked;
+            
+            if (!enableFilter) {
+                return alerts;
+            }
+            
+            const thresholdInput = document.getElementById('threshold');
+            let threshold = parseFloat(thresholdInput.value);
+            
+            if (isNaN(threshold) || threshold < 0) {
+                console.warn('Invalid threshold, using default 0.5');
+                threshold = 0.5;
+                thresholdInput.value = 0.5;
+            }
+            
+            return alerts.filter(alert => {
+                const ratio = parseFloat(alert.volume_ratio);
+                if (isNaN(ratio)) return false;
+                return ratio >= threshold;
+            });
+        }
+
+        // 加载提醒数据
+        async function loadAlerts() {
+            try {
+                // 调用新接口
+                const response = await fetch('/api/volume-alerts-data?limit=50');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const alerts = await response.json();
+                console.log('Loaded alerts:', alerts.length);
+                
+                window.cachedAlerts = alerts;
+                renderAlerts(alerts);
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+                document.getElementById('alerts-list').innerHTML = 
+                    '<li class="error">加载提醒数据失败，请稍后重试</li>';
+            }
+        }
+
+        function reRenderAlerts() {
+            if (window.cachedAlerts) {
+                renderAlerts(window.cachedAlerts);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Volume Alerts page loaded');
+            initFilter();
+            loadAlerts();
+            setInterval(loadAlerts, 10000);
+        });
+
+        // 初始化筛选功能
+        function initFilter() {
+            const thresholdInput = document.getElementById('threshold');
+            const enableFilterCheckbox = document.getElementById('enable-filter');
+            const filterStatusSpan = document.getElementById('filter-status');
+            const toggleBtn = document.getElementById('toggle-config');
+            const configContent = document.getElementById('config-content');
+
+            // 从URL/LocalStorage加载配置 (简化版)
+            const savedConfig = localStorage.getItem('volumeFilterConfig');
+            if (savedConfig) {
+                try {
+                    const config = JSON.parse(savedConfig);
+                    thresholdInput.value = config.threshold || 0.5;
+                    enableFilterCheckbox.checked = config.enabled !== false;
+                } catch(e) {}
+            }
+
+            toggleBtn.addEventListener('click', function() {
+                const isCollapsed = configContent.classList.contains('collapsed');
+                if (isCollapsed) {
+                    configContent.classList.remove('collapsed');
+                    toggleBtn.textContent = '▼';
+                } else {
+                    configContent.classList.add('collapsed');
+                    toggleBtn.textContent = '▶';
+                }
+            });
+
+            thresholdInput.addEventListener('input', updateConfig);
+            enableFilterCheckbox.addEventListener('change', updateConfig);
+
+            function updateConfig() {
+                const threshold = parseFloat(thresholdInput.value) || 0;
+                const enabled = enableFilterCheckbox.checked;
+
+                localStorage.setItem('volumeFilterConfig', JSON.stringify({ threshold, enabled }));
+                
+                if (enabled) {
+                    filterStatusSpan.textContent = `筛选状态: 已启用，阈值 ${threshold}`;
+                } else {
+                    filterStatusSpan.textContent = '筛选状态: 已禁用';
+                }
+
+                reRenderAlerts();
+            }
+
+            // Initial status update
+            updateConfig();
+        }
+    </script>
+</body>
+</html>
