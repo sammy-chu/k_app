@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>K线提醒列表</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #ddd;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .nav-links a {
+            color: #007acc;
+            text-decoration: none;
+            padding: 8px 16px;
+            margin: 0 10px;
+            border: 1px solid #007acc;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+
+        .nav-links a:hover {
+            background-color: #007acc;
+            color: white;
+        }
+
+        .alerts-header {
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .alerts-title {
+            font-size: 1.5em;
+            color: #ddd;
+            font-weight: normal;
+        }
+
+        /* 配置面板样式 */
+        .config-panel {
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .config-header {
+            background-color: #333;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .config-header h3 {
+            margin: 0;
+            font-size: 1.1em;
+            color: #ddd;
+            font-weight: normal;
+        }
+
+        .toggle-btn {
+            background: none;
+            border: none;
+            color: #007acc;
+            font-size: 16px;
+            cursor: pointer;
+            padding: 4px;
+            transition: transform 0.2s;
+        }
+
+        .toggle-btn:hover {
+            color: #0099ff;
+        }
+
+        .config-content {
+            padding: 16px;
+            display: block;
+        }
+
+        .config-content.collapsed {
+            display: none;
+        }
+
+        .config-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+        }
+
+        .config-row label {
+            color: #ddd;
+            min-width: 120px;
+        }
+
+        .alerts-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .alert-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #2a2a2a;
+            font-size: 14px;
+            color: #ddd;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .alert-item:last-child {
+            border-bottom: none;
+        }
+
+        .alert-symbol {
+            font-weight: bold;
+            color: #ffffff;
+            min-width: 80px;
+        }
+
+        .alert-time {
+            color: #888;
+            min-width: 120px;
+            font-size: 13px;
+        }
+
+        .alert-amplitude {
+            font-weight: bold;
+            min-width: 80px;
+        }
+
+        .alert-direction {
+            min-width: 20px;
+            font-size: 16px;
+        }
+
+        .alert-prices {
+            color: #888;
+            font-size: 13px;
+            flex: 1;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #ff6b6b;
+        }
+
+        .no-alerts {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        /* 振幅颜色 - 根据涨跌方向 */
+        .amp-up { color: #26a69a; }      /* 上涨绿色 */
+        .amp-down { color: #ef5350; }    /* 下跌红色 */
+        .amp-flat { color: #888; }       /* 平盘灰色 */
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .alert-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+                padding: 12px 0;
+            }
+
+            .alert-symbol,
+            .alert-time,
+            .alert-amplitude,
+            .alert-direction {
+                min-width: auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-links">
+            <a href="/">首页</a>
+            <a href="/alerts" style="background-color: #007acc; color: white;">价格提醒</a>
+            <a href="/volume-alerts">成交量提醒</a>
+            <a href="/hills">山丘扫描</a>
+            <a href="/hill-alerts">山丘提醒</a>
+        </div>
+
+        <div class="alerts-header">
+            <h2 class="alerts-title">提醒列表（最近）</h2>
+        </div>
+
+        <!-- 振幅筛选面板 -->
+        <div class="config-panel">
+            <div class="config-header">
+                <h3>振幅筛选配置</h3>
+                <button id="toggle-amplitude-config" class="toggle-btn">▼</button>
+            </div>
+            <div id="amplitude-config-content" class="config-content">
+                <div class="config-row">
+                    <label for="amplitude-threshold">最小振幅阈值：</label>
+                    <input type="number" id="amplitude-threshold" min="0" step="0.01" placeholder="0.01" value="0.01">
+                    <label for="enable-amplitude-filter">
+                        <input type="checkbox" id="enable-amplitude-filter" checked>
+                        启用振幅筛选
+                    </label>
+                </div>
+                <div class="config-status">
+                    <span id="amplitude-filter-status">筛选状态: 已启用，阈值 0.01</span>
+                </div>
+            </div>
+        </div>
+
+        <ul class="alerts-list" id="alerts-list">
+            <li class="loading">正在加载提醒数据...</li>
+        </ul>
+    </div>
+
+    <script>
+        // 格式化北京时间 - 简化格式
+        function formatBeijingTime(isoString) {
+            const date = new Date(isoString);
+            // 直接使用北京时区格式化，不手动添加时区偏移
+            return date.toLocaleString('zh-CN', {
+                timeZone: 'Asia/Shanghai',
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
+            }).replace(/\//g, '/');
+        }
+
+        // 获取方向指示器
+        function getDirectionIndicator(direction) {
+            switch(direction) {
+                case 1: return '↑';
+                case -1: return '↓';
+                default: return '→';
+            }
+        }
+
+        // 获取振幅CSS类
+        function getAmplitudeClass(amplitude, direction) {
+            const amp = parseFloat(amplitude);
+            // 根据方向返回不同的颜色类
+            if (direction > 0) {
+                // 上涨时显示绿色
+                return 'amp-up';
+            } else if (direction < 0) {
+                // 下跌时显示红色
+                return 'amp-down';
+            } else {
+                // 平盘时显示灰色
+                return 'amp-flat';
+            }
+        }
+
+        // 渲染提醒列表 - 简洁单行格式
+        function renderAlerts(alerts) {
+            const alertsList = document.getElementById('alerts-list');
+            
+            if (!alerts || alerts.length === 0) {
+                alertsList.innerHTML = '<li class="no-alerts">暂无提醒数据</li>';
+                return;
+            }
+
+            // 应用振幅筛选
+            const filteredAlerts = applyAmplitudeFilter(alerts);
+            
+            if (filteredAlerts.length === 0) {
+                alertsList.innerHTML = '<li class="no-alerts">没有符合筛选条件的提醒数据</li>';
+                return;
+            }
+
+            alertsList.innerHTML = filteredAlerts.map(alert => {
+                const amplitude = (parseFloat(alert.amplitude_pct) * 100).toFixed(2);
+                const amplitudeText = `振幅 ${amplitude}%`;
+                const amplitudeClass = getAmplitudeClass(amplitude, alert.direction);
+
+                const direction = getDirectionIndicator(alert.direction);
+                const time = formatBeijingTime(alert.created_at);
+                const open = parseFloat(alert.open).toFixed(4);
+                const close = parseFloat(alert.close).toFixed(4);
+                
+                return `
+                    <li class="alert-item">
+                        <span class="alert-symbol">${alert.symbol}</span>
+                        <span class="alert-time">${time}</span>
+                        <span class="alert-amplitude ${amplitudeClass}">${amplitudeText}</span>
+                        <span class="alert-direction">${direction}</span>
+                        <span class="alert-prices">O:${open} C:${close}</span>
+                    </li>
+                `;
+            }).join('');
+        }
+
+        // 应用振幅筛选
+        function applyAmplitudeFilter(alerts) {
+            const enableFilter = document.getElementById('enable-amplitude-filter').checked;
+            
+            if (!enableFilter) {
+                return alerts;
+            }
+            
+            const thresholdInput = document.getElementById('amplitude-threshold');
+            let threshold = parseFloat(thresholdInput.value);
+            
+            // 边界值检查和健壮性处理
+            if (isNaN(threshold) || threshold < 0) {
+                console.warn('Invalid amplitude threshold, using default 0.01');
+                threshold = 0.01;
+                thresholdInput.value = 0.01;
+            }
+            
+            // 限制最大阈值为100%
+            if (threshold > 100) {
+                console.warn('Amplitude threshold too large, capping at 100%');
+                threshold = 100;
+                thresholdInput.value = 100;
+            }
+            
+            return alerts.filter(alert => {
+                const amplitude = parseFloat(alert.amplitude_pct);
+                
+                // 健壮性检查：处理无效的amplitude_pct值
+                if (isNaN(amplitude) || amplitude === null || amplitude === undefined) {
+                    console.warn('Invalid amplitude_pct for alert:', alert);
+                    return false;
+                }
+                
+                // 筛选绝对振幅大于等于阈值的记录
+                const absAmplitude = Math.abs(amplitude);
+                const thresholdDecimal = threshold / 100;
+                
+                return absAmplitude >= thresholdDecimal;
+            });
+        }
+
+        // 加载提醒数据
+        async function loadAlerts() {
+            try {
+                const response = await fetch('/api/alerts?limit=50');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const alerts = await response.json();
+                console.log('Loaded alerts:', alerts.length);
+                
+                // 缓存原始数据，避免重复请求
+                window.cachedAlerts = alerts;
+                
+                renderAlerts(alerts);
+            } catch (error) {
+                console.error('Error loading alerts:', error);
+                document.getElementById('alerts-list').innerHTML = 
+                    '<li class="error">加载提醒数据失败，请稍后重试</li>';
+            }
+        }
+
+        // 重新渲染已缓存的数据（用于筛选条件变化时）
+        function reRenderAlerts() {
+            if (window.cachedAlerts) {
+                renderAlerts(window.cachedAlerts);
+            }
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Alerts page loaded');
+            
+            // 初始化振幅筛选配置
+            initAmplitudeFilter();
+            
+            // 立即加载一次数据
+            loadAlerts();
+            
+            // 每10秒自动刷新
+            setInterval(loadAlerts, 10000);
+        });
+
+        // 初始化振幅筛选功能
+        function initAmplitudeFilter() {
+            const amplitudeThresholdInput = document.getElementById('amplitude-threshold');
+            const enableFilterCheckbox = document.getElementById('enable-amplitude-filter');
+            const filterStatusSpan = document.getElementById('amplitude-filter-status');
+            const toggleBtn = document.getElementById('toggle-amplitude-config');
+            const configContent = document.getElementById('amplitude-config-content');
+
+            // 从URL参数和localStorage加载配置
+            loadAmplitudeFilterConfig();
+
+            // 折叠/展开功能
+            toggleBtn.addEventListener('click', function() {
+                const isCollapsed = configContent.classList.contains('collapsed');
+                if (isCollapsed) {
+                    configContent.classList.remove('collapsed');
+                    toggleBtn.textContent = '▼';
+                } else {
+                    configContent.classList.add('collapsed');
+                    toggleBtn.textContent = '▶';
+                }
+            });
+
+            // 监听阈值输入变化
+            amplitudeThresholdInput.addEventListener('input', function() {
+                saveAmplitudeFilterConfig();
+                updateFilterStatus();
+                // 重新渲染已缓存的数据，避免重复请求
+                reRenderAlerts();
+            });
+
+            // 监听启用/禁用筛选变化
+            enableFilterCheckbox.addEventListener('change', function() {
+                saveAmplitudeFilterConfig();
+                updateFilterStatus();
+                // 重新渲染已缓存的数据，避免重复请求
+                reRenderAlerts();
+            });
+
+            // 更新筛选状态显示
+            function updateFilterStatus() {
+                const enabled = enableFilterCheckbox.checked;
+                const threshold = parseFloat(amplitudeThresholdInput.value) || 0.01;
+                
+                if (enabled) {
+                    filterStatusSpan.textContent = `筛选状态: 已启用，阈值 ${threshold}`;
+            } else {
+                filterStatusSpan.textContent = '筛选状态: 已禁用';
+            }
+            }
+
+            // 从URL参数和localStorage加载配置
+            function loadAmplitudeFilterConfig() {
+                // 从URL参数读取
+                const urlParams = new URLSearchParams(window.location.search);
+                const ampMinParam = urlParams.get('amp_min');
+                
+                // 从localStorage读取
+                const savedConfig = localStorage.getItem('amplitudeFilterConfig');
+                let config = { threshold: 0.01, enabled: true };
+                
+                if (savedConfig) {
+                    try {
+                        config = JSON.parse(savedConfig);
+                        // 验证配置数据的有效性
+                        if (typeof config.threshold !== 'number' || config.threshold < 0 || config.threshold > 100) {
+                            console.warn('Invalid saved threshold, using default');
+                            config.threshold = 0.01;
+                        }
+                        if (typeof config.enabled !== 'boolean') {
+                            console.warn('Invalid saved enabled state, using default');
+                            config.enabled = true;
+                        }
+                    } catch (e) {
+                        console.warn('Failed to parse saved amplitude filter config:', e);
+                        config = { threshold: 0.01, enabled: true };
+                    }
+                }
+                
+                // URL参数优先级更高，但需要验证
+                if (ampMinParam !== null) {
+                    const threshold = parseFloat(ampMinParam);
+                    if (!isNaN(threshold) && threshold >= 0 && threshold <= 100) {
+                        config.threshold = threshold;
+                        config.enabled = true;
+                    } else {
+                        console.warn('Invalid URL parameter amp_min:', ampMinParam);
+                    }
+                }
+                
+                // 应用配置
+                amplitudeThresholdInput.value = config.threshold;
+                enableFilterCheckbox.checked = config.enabled;
+                updateFilterStatus();
+            }
+
+            // 保存配置到localStorage和URL
+            function saveAmplitudeFilterConfig() {
+                const threshold = parseFloat(amplitudeThresholdInput.value);
+                const enabled = enableFilterCheckbox.checked;
+                
+                // 验证阈值有效性
+                if (isNaN(threshold) || threshold < 0 || threshold > 100) {
+                    console.warn('Cannot save invalid threshold:', threshold);
+                    return;
+                }
+                
+                const config = { threshold, enabled };
+                
+                // 保存到localStorage
+                try {
+                    localStorage.setItem('amplitudeFilterConfig', JSON.stringify(config));
+                } catch (e) {
+                    console.error('Failed to save amplitude filter config to localStorage:', e);
+                }
+                
+                // 更新URL参数（不刷新页面）
+                const url = new URL(window.location);
+                if (enabled && threshold > 0) {
+                    url.searchParams.set('amp_min', threshold.toString());
+                } else {
+                    url.searchParams.delete('amp_min');
+                }
+                window.history.replaceState({}, '', url);
+            }
+
+            // 初始更新状态
+            updateFilterStatus();
+        }
+
+    </script>
+</body>
+</html>

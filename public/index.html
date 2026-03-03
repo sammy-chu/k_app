@@ -1,0 +1,1113 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>K Chart MVP</title>
+    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+    <style>
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background-color: #1a1a1a;
+        color: #ddd;
+      }
+      #chart { 
+        width: 100%; 
+        height: 500px; 
+        margin-top: 20px;
+        border: 1px solid #333;
+        border-radius: 8px 8px 0 0;
+        border-bottom: none;
+        position: relative;
+      }
+      #volume-chart {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #333;
+        border-radius: 0;
+        border-top: 1px solid #444;
+        position: relative;
+        border-bottom: none;
+      }
+      #macd-chart {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #333;
+        border-radius: 0 0 8px 8px;
+        border-top: 1px solid #444;
+        position: relative;
+      }
+      #rsi-chart {
+        width: 100%;
+        height: 150px;
+        border: 1px solid #333;
+        border-radius: 0 0 8px 8px;
+        border-top: 1px solid #444;
+        position: relative;
+        border-bottom: 1px solid #333;
+      }
+      #volume-tooltip {
+        position: absolute;
+        display: none;
+        padding: 8px;
+        box-sizing: border-box;
+        font-size: 12px;
+        text-align: left;
+        z-index: 1000;
+        pointer-events: none;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.9);
+        color: #ddd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      }
+      #macd-tooltip {
+        position: absolute;
+        display: none;
+        padding: 8px;
+        box-sizing: border-box;
+        font-size: 12px;
+        text-align: left;
+        z-index: 1000;
+        pointer-events: none;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.9);
+        color: #ddd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      }
+      #rsi-tooltip {
+        position: absolute;
+        display: none;
+        padding: 8px;
+        box-sizing: border-box;
+        font-size: 12px;
+        text-align: left;
+        z-index: 1000;
+        pointer-events: none;
+        border: 1px solid #444;
+        border-radius: 4px;
+        background: rgba(0, 0, 0, 0.9);
+        color: #ddd;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      }
+      #toolbar { 
+        display: flex; 
+        gap: 12px; 
+        margin: 20px 0;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      #toolbar input, #toolbar button {
+        padding: 8px 12px;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background-color: #2a2a2a;
+        color: #ddd;
+        font-size: 14px;
+      }
+      .ma-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-left: 12px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .ma-toggle input {
+        margin: 0;
+        cursor: pointer;
+      }
+      .ma-toggle span {
+        font-size: 14px;
+        font-weight: 500;
+      }
+      #toolbar input:focus {
+        outline: none;
+        border-color: #007acc;
+      }
+      #toolbar button {
+        background-color: #007acc;
+        color: white;
+        cursor: pointer;
+        transition: background-color 0.2s;
+      }
+      #toolbar button:hover {
+        background-color: #005a9e;
+      }
+      #toolbar button:disabled {
+        background-color: #555;
+        cursor: not-allowed;
+      }
+      #status {
+        margin-top: 10px;
+        font-size: 14px;
+        color: #888;
+      }
+      .error {
+        color: #ff6b6b;
+      }
+      .success {
+        color: #51cf66;
+      }
+      h1 {
+        margin: 0 0 20px 0;
+        color: #fff;
+      }
+    </style>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+  </head>
+  <body>
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h1>K Chart MVP - 股票K线图</h1>
+      <div style="display: flex; gap: 15px;">
+        <a href="/" style="color: #007acc; text-decoration: none; padding: 8px 16px; border: 1px solid #007acc; border-radius: 4px; transition: all 0.2s;">📈 K线图表</a>
+        <a href="/alerts" style="color: #007acc; text-decoration: none; padding: 8px 16px; border: 1px solid #007acc; border-radius: 4px; transition: all 0.2s;">🚨 价格提醒</a>
+        <a href="/volume-alerts" style="color: #007acc; text-decoration: none; padding: 8px 16px; border: 1px solid #007acc; border-radius: 4px; transition: all 0.2s;">📊 成交量提醒</a>
+        <a href="/hills" style="color: #007acc; text-decoration: none; padding: 8px 16px; border: 1px solid #007acc; border-radius: 4px; transition: all 0.2s;">⛰️ 山丘扫描</a>
+        <a href="/hill-alerts" style="color: #007acc; text-decoration: none; padding: 8px 16px; border: 1px solid #007acc; border-radius: 4px; transition: all 0.2s;">⛰️ 山丘提醒</a>
+      </div>
+    </div>
+    <div id="toolbar">
+      <input id="symbol" placeholder="输入symbol，如 AMD.BL" value="AMD.BL" />
+      <input id="date" type="date" />
+      <button id="load">加载数据</button>
+      
+      <!-- MA Toggles -->
+      <label class="ma-toggle" style="color: #E6E6FA">
+        <input type="checkbox" id="toggle-ma5" checked> MA5
+      </label>
+      <label class="ma-toggle" style="color: #FFFF00">
+        <input type="checkbox" id="toggle-ma10" checked> MA10
+      </label>
+      <label class="ma-toggle" style="color: #FF00FF">
+        <input type="checkbox" id="toggle-ma20" checked> MA20
+      </label>
+
+      <!-- EMA Toggles -->
+      <label class="ma-toggle" style="color: #2962FF">
+        <input type="checkbox" id="toggle-ema12"> EMA12
+      </label>
+      <label class="ma-toggle" style="color: #FF6D00">
+        <input type="checkbox" id="toggle-ema26"> EMA26
+      </label>
+
+      <!-- Chart Toggles -->
+      <div style="width: 1px; height: 20px; background: #444; margin: 0 8px;"></div>
+      <label class="ma-toggle">
+        <input type="checkbox" id="toggle-volume" checked> Volume
+      </label>
+      <label class="ma-toggle">
+        <input type="checkbox" id="toggle-macd" checked> MACD
+      </label>
+      <label class="ma-toggle">
+        <input type="checkbox" id="toggle-rsi"> RSI
+      </label>
+
+      <div id="status"></div>
+    </div>
+    <div id="chart"></div>
+    <div id="volume-chart"></div>
+    <div id="macd-chart"></div>
+    <div id="rsi-chart" style="display: none;"></div>
+
+    <script>
+      // 等待库加载完成
+      function initChart() {
+        if (typeof LightweightCharts === 'undefined') {
+          setTimeout(initChart, 100);
+          return;
+        }
+
+        // MACD Calculation Function
+        function calculateMACD(data, fastPeriod = 12, slowPeriod = 26, signalPeriod = 9) {
+          let emaFast = 0;
+          let emaSlow = 0;
+          let dea = 0;
+          
+          const result = [];
+          
+          data.forEach((item, i) => {
+            const close = item.close;
+            
+            if (i === 0) {
+              emaFast = close;
+              emaSlow = close;
+              dea = 0;
+            } else {
+              // EMA formula: Price(t) * k + EMA(y) * (1 - k)
+              // k = 2 / (N + 1)
+              const kFast = 2 / (fastPeriod + 1);
+              const kSlow = 2 / (slowPeriod + 1);
+              
+              emaFast = close * kFast + emaFast * (1 - kFast);
+              emaSlow = close * kSlow + emaSlow * (1 - kSlow);
+            }
+            
+            const dif = emaFast - emaSlow;
+            
+            if (i === 0) {
+              dea = dif;
+            } else {
+              const kSignal = 2 / (signalPeriod + 1);
+              dea = dif * kSignal + dea * (1 - kSignal);
+            }
+            
+            const macdBar = 2 * (dif - dea);
+            
+            result.push({
+              time: item.time,
+              dif,
+              dea,
+              macdBar,
+              emaFast,
+              emaSlow
+            });
+          });
+          
+          return result;
+        }
+
+        // RSI Calculation Function
+        function calculateRSI(data, period = 14) {
+          const result = [];
+          let avgGain = 0;
+          let avgLoss = 0;
+          let changes = [];
+
+          data.forEach((item, i) => {
+            if (i === 0) {
+              result.push({ time: item.time, value: NaN });
+              return;
+            }
+
+            const change = item.close - data[i - 1].close;
+            const gain = change > 0 ? change : 0;
+            const loss = change < 0 ? Math.abs(change) : 0;
+
+            if (i <= period) {
+              changes.push({ gain, loss });
+              if (i === period) {
+                let sumGain = 0;
+                let sumLoss = 0;
+                changes.forEach(c => {
+                  sumGain += c.gain;
+                  sumLoss += c.loss;
+                });
+                avgGain = sumGain / period;
+                avgLoss = sumLoss / period;
+                
+                const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+                const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+                result.push({ time: item.time, value: rsi });
+              } else {
+                result.push({ time: item.time, value: NaN });
+              }
+            } else {
+              avgGain = ((avgGain * (period - 1)) + gain) / period;
+              avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+
+              const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
+              const rsi = avgLoss === 0 ? 100 : 100 - (100 / (1 + rs));
+
+              result.push({ time: item.time, value: rsi });
+            }
+          });
+          return result;
+        }
+        
+        // 创建图表
+        const chart = LightweightCharts.createChart(document.getElementById('chart'), {
+        layout: { 
+          background: { type: 'solid', color: '#1a1a1a' }, 
+          textColor: '#ddd' 
+        },
+        rightPriceScale: { 
+          borderVisible: false,
+          scaleMargins: {
+            top: 0.1,
+            bottom: 0.1,
+          },
+        },
+        timeScale: { 
+          borderVisible: false,
+          timeVisible: true,
+          secondsVisible: false,
+          // 添加自定义时间格式化器以显示本地时间
+          tickMarkFormatter: (time, tickMarkType, locale) => {
+            const date = new Date(time * 1000);
+            const options = { timeZone: 'Asia/Shanghai' };
+            
+            switch (tickMarkType) {
+              case 0: // Year
+                return date.toLocaleDateString('zh-CN', { ...options, year: 'numeric' });
+              case 1: // Month
+                return date.toLocaleDateString('zh-CN', { ...options, month: 'short' });
+              case 2: // Day
+                return date.toLocaleDateString('zh-CN', { ...options, day: 'numeric' });
+              case 3: // Time
+                return date.toLocaleTimeString('zh-CN', { 
+                  ...options, 
+                  hour12: false, 
+                  hour: '2-digit', 
+                  minute: '2-digit' 
+                });
+              case 4: // TimeWithSeconds
+                return date.toLocaleTimeString('zh-CN', { 
+                  ...options, 
+                  hour12: false, 
+                  hour: '2-digit', 
+                  minute: '2-digit', 
+                  second: '2-digit' 
+                });
+              default:
+                return date.toLocaleString('zh-CN', options);
+            }
+          }
+        },
+        grid: {
+          vertLines: {
+            color: '#333',
+          },
+          horzLines: {
+            color: '#333',
+          },
+        },
+        crosshair: {
+          mode: LightweightCharts.CrosshairMode.Normal,
+        },
+      });
+
+      // 添加蜡烛图系列
+        const series = chart.addSeries(LightweightCharts.CandlestickSeries, {
+          upColor: '#26a69a',
+          downColor: '#ef5350',
+          borderVisible: false,
+          wickUpColor: '#26a69a',
+          wickDownColor: '#ef5350',
+        });
+
+        // 添加移动平均线系列
+        const ma5Series = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#E6E6FA', // 浅紫色 (Lavender)
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        const ma10Series = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FFFF00', // 黄色
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        const ma20Series = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FF00FF', // 紫红色 (Magenta)
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        // Add EMA Series
+        const emaFastSeries = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#2962FF', // Blue
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          visible: false, // Default hidden
+        });
+
+        const emaSlowSeries = chart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FF6D00', // Orange
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+          visible: false, // Default hidden
+        });
+
+        // 创建成交量图表
+        const volumeChart = LightweightCharts.createChart(document.getElementById('volume-chart'), {
+          layout: { 
+            background: { type: 'solid', color: '#1a1a1a' }, 
+            textColor: '#ddd' 
+          },
+          rightPriceScale: { 
+            borderVisible: false,
+            scaleMargins: {
+              top: 0.1,
+              bottom: 0.1,
+            },
+          },
+          timeScale: { 
+            borderVisible: false,
+            timeVisible: true,
+            visible: false, // 隐藏时间轴，与主图表共享
+          },
+          grid: {
+            vertLines: { color: '#333' },
+            horzLines: { color: '#333' },
+          },
+        });
+
+        // 添加成交量系列
+        const volumeSeries = volumeChart.addSeries(LightweightCharts.HistogramSeries, {
+          color: '#26a69a',
+          priceFormat: {
+            type: 'volume',
+          },
+          priceScaleId: '', // set as an overlay setting,
+        });
+
+        // Create MACD Chart
+        const macdChart = LightweightCharts.createChart(document.getElementById('macd-chart'), {
+          layout: { 
+            background: { type: 'solid', color: '#1a1a1a' }, 
+            textColor: '#ddd' 
+          },
+          rightPriceScale: { 
+            borderVisible: false,
+            scaleMargins: {
+              top: 0.1,
+              bottom: 0.1,
+            },
+          },
+          timeScale: { 
+            borderVisible: false,
+            timeVisible: true,
+            visible: false,
+          },
+          grid: {
+            vertLines: { color: '#333' },
+            horzLines: { color: '#333' },
+          },
+        });
+
+        // Add MACD Series
+        const macdHistogramSeries = macdChart.addSeries(LightweightCharts.HistogramSeries, {
+          color: '#26a69a',
+          lineWidth: 1,
+          priceFormat: {
+            type: 'volume',
+            precision: 2,
+            minMove: 0.01,
+          },
+          priceScaleId: 'right',
+        });
+        
+        const macdFastSeries = macdChart.addSeries(LightweightCharts.LineSeries, {
+          color: '#2962FF', // Blue for DIF
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+        
+        const macdSlowSeries = macdChart.addSeries(LightweightCharts.LineSeries, {
+          color: '#FF6D00', // Orange for DEA
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        // Create RSI Chart
+        const rsiChart = LightweightCharts.createChart(document.getElementById('rsi-chart'), {
+          layout: { 
+            background: { type: 'solid', color: '#1a1a1a' }, 
+            textColor: '#ddd' 
+          },
+          rightPriceScale: { 
+            borderVisible: false,
+            scaleMargins: {
+              top: 0.1,
+              bottom: 0.1,
+            },
+          },
+          timeScale: { 
+            borderVisible: false,
+            timeVisible: true,
+            visible: false,
+          },
+          grid: {
+            vertLines: { color: '#333' },
+            horzLines: { color: '#333' },
+          },
+        });
+
+        // Add RSI Series
+        const rsiSeries = rsiChart.addSeries(LightweightCharts.LineSeries, {
+          color: '#7B1FA2', // Purple
+          lineWidth: 1,
+          priceLineVisible: false,
+          lastValueVisible: false,
+        });
+
+        // Add 70/30 reference lines
+        rsiSeries.createPriceLine({
+          price: 70,
+          color: '#ef5350',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: false,
+        });
+        
+        rsiSeries.createPriceLine({
+          price: 30,
+          color: '#26a69a',
+          lineWidth: 1,
+          lineStyle: LightweightCharts.LineStyle.Dashed,
+          axisLabelVisible: false,
+        });
+
+          // 创建 Tooltip 元素
+          const toolTip = document.createElement('div');
+          toolTip.id = 'volume-tooltip';
+          document.getElementById('volume-chart').appendChild(toolTip);
+          
+          // Create MACD Tooltip
+          const macdToolTip = document.createElement('div');
+          macdToolTip.id = 'macd-tooltip';
+          document.getElementById('macd-chart').appendChild(macdToolTip);
+
+          // Create RSI Tooltip
+          const rsiToolTip = document.createElement('div');
+          rsiToolTip.id = 'rsi-tooltip';
+          document.getElementById('rsi-chart').appendChild(rsiToolTip);
+  
+          // 创建主图表 Tooltip 元素 (MA显示)
+          const mainToolTip = document.createElement('div');
+          mainToolTip.style.position = 'absolute';
+          mainToolTip.style.display = 'none';
+          mainToolTip.style.padding = '8px';
+          mainToolTip.style.boxSizing = 'border-box';
+          mainToolTip.style.fontSize = '12px';
+          mainToolTip.style.textAlign = 'left';
+          mainToolTip.style.zIndex = '1000';
+          mainToolTip.style.pointerEvents = 'none';
+          mainToolTip.style.border = '1px solid #444';
+          mainToolTip.style.borderRadius = '4px';
+          mainToolTip.style.background = 'rgba(0, 0, 0, 0.7)';
+          mainToolTip.style.color = '#ddd';
+          mainToolTip.style.top = '10px';
+          mainToolTip.style.left = '10px';
+          document.getElementById('chart').appendChild(mainToolTip);
+  
+          // 监听主图表十字光标移动
+          chart.subscribeCrosshairMove(param => {
+             if (
+               param.point === undefined ||
+               !param.time ||
+               param.point.x < 0 ||
+               param.point.x > document.getElementById('chart').clientWidth ||
+               param.point.y < 0 ||
+               param.point.y > document.getElementById('chart').clientHeight
+             ) {
+               mainToolTip.style.display = 'none';
+               return;
+             }
+  
+             const ma5 = param.seriesData.get(ma5Series);
+             const ma10 = param.seriesData.get(ma10Series);
+             const ma20 = param.seriesData.get(ma20Series);
+             const emaFast = param.seriesData.get(emaFastSeries);
+             const emaSlow = param.seriesData.get(emaSlowSeries);
+             
+             if (ma5 || ma10 || ma20 || emaFast || emaSlow) {
+                mainToolTip.style.display = 'block';
+                let html = '';
+                if (ma5) html += `<span style="color: #E6E6FA">MA5: ${ma5.value.toFixed(2)}</span> `;
+                if (ma10) html += `<span style="color: #FFFF00">MA10: ${ma10.value.toFixed(2)}</span> `;
+                if (ma20) html += `<span style="color: #FF00FF">MA20: ${ma20.value.toFixed(2)}</span> `;
+                if (emaFast && document.getElementById('toggle-ema12').checked) html += `<span style="color: #2962FF">EMA12: ${emaFast.value.toFixed(2)}</span> `;
+                if (emaSlow && document.getElementById('toggle-ema26').checked) html += `<span style="color: #FF6D00">EMA26: ${emaSlow.value.toFixed(2)}</span>`;
+                mainToolTip.innerHTML = html;
+             } else {
+                mainToolTip.style.display = 'none';
+             }
+          });
+  
+          // 监听十字光标移动
+        volumeChart.subscribeCrosshairMove(param => {
+          const container = document.getElementById('volume-chart');
+          
+          if (
+            param.point === undefined ||
+            !param.time ||
+            param.point.x < 0 ||
+            param.point.x > container.clientWidth ||
+            param.point.y < 0 ||
+            param.point.y > container.clientHeight
+          ) {
+            toolTip.style.display = 'none';
+            return;
+          }
+
+          const data = param.seriesData.get(volumeSeries);
+          if (!data) {
+            toolTip.style.display = 'none';
+            return;
+          }
+          
+          const date = new Date(data.time * 1000);
+          // 使用与K线图一致的时区处理
+          const options = { timeZone: 'Asia/Shanghai' };
+          const dateStr = date.toLocaleString('zh-CN', { 
+            ...options,
+            month: 'numeric',
+            day: 'numeric',
+            hour12: false, 
+            hour: '2-digit', 
+            minute: '2-digit'
+          });
+          
+          const volumeStr = Math.round(data.value).toLocaleString();
+
+          toolTip.style.display = 'block';
+          toolTip.innerHTML = `<div>时间: ${dateStr}</div><div style="margin-top: 4px; color: ${data.color}">成交量: ${volumeStr}</div>`;
+          
+          // 智能定位
+          const toolTipWidth = 120;
+          const toolTipHeight = 50;
+          const margin = 10;
+          
+          let left = param.point.x + margin;
+          if (left + toolTipWidth > container.clientWidth) {
+            left = param.point.x - toolTipWidth - margin;
+          }
+          
+          let top = param.point.y + margin;
+          if (top + toolTipHeight > container.clientHeight) {
+            top = param.point.y - toolTipHeight - margin;
+          }
+          
+          toolTip.style.left = left + 'px';
+          toolTip.style.top = top + 'px';
+        });
+
+        // MACD Crosshair Move
+        macdChart.subscribeCrosshairMove(param => {
+          const container = document.getElementById('macd-chart');
+          
+          if (
+            param.point === undefined ||
+            !param.time ||
+            param.point.x < 0 ||
+            param.point.x > container.clientWidth ||
+            param.point.y < 0 ||
+            param.point.y > container.clientHeight
+          ) {
+            macdToolTip.style.display = 'none';
+            return;
+          }
+
+          const difData = param.seriesData.get(macdFastSeries);
+          const deaData = param.seriesData.get(macdSlowSeries);
+          const histData = param.seriesData.get(macdHistogramSeries);
+          
+          if (!difData || !deaData || !histData) {
+             macdToolTip.style.display = 'none';
+             return;
+          }
+          
+          macdToolTip.style.display = 'block';
+          macdToolTip.innerHTML = `
+            <div style="display: flex; gap: 8px;">
+              <span style="color: #2962FF">DIF: ${difData.value.toFixed(2)}</span>
+              <span style="color: #FF6D00">DEA: ${deaData.value.toFixed(2)}</span>
+              <span style="color: ${histData.color}">MACD: ${histData.value.toFixed(2)}</span>
+            </div>
+          `;
+          
+          // Position
+          let left = param.point.x + 10;
+          let top = param.point.y + 10;
+          
+          if (left + 150 > container.clientWidth) {
+            left = param.point.x - 150 - 10;
+          }
+           if (top + 40 > container.clientHeight) {
+            top = param.point.y - 40 - 10;
+          }
+          
+          macdToolTip.style.left = left + 'px';
+          macdToolTip.style.top = top + 'px';
+        });
+
+        // RSI Crosshair Move
+        rsiChart.subscribeCrosshairMove(param => {
+          const container = document.getElementById('rsi-chart');
+          
+          if (
+            param.point === undefined ||
+            !param.time ||
+            param.point.x < 0 ||
+            param.point.x > container.clientWidth ||
+            param.point.y < 0 ||
+            param.point.y > container.clientHeight
+          ) {
+            rsiToolTip.style.display = 'none';
+            return;
+          }
+
+          const rsiData = param.seriesData.get(rsiSeries);
+          
+          if (!rsiData) {
+             rsiToolTip.style.display = 'none';
+             return;
+          }
+          
+          rsiToolTip.style.display = 'block';
+          rsiToolTip.innerHTML = `<span style="color: #7B1FA2">RSI(14): ${rsiData.value.toFixed(2)}</span>`;
+          
+          // Position
+          let left = param.point.x + 10;
+          let top = param.point.y + 10;
+          
+          if (left + 100 > container.clientWidth) {
+            left = param.point.x - 100 - 10;
+          }
+           if (top + 40 > container.clientHeight) {
+            top = param.point.y - 40 - 10;
+          }
+          
+          rsiToolTip.style.left = left + 'px';
+          rsiToolTip.style.top = top + 'px';
+        });
+
+        // Sync Charts
+        const charts = [chart, volumeChart, macdChart, rsiChart];
+        let isSyncing = false;
+        
+        const syncHandler = (source) => (range) => {
+          if (isSyncing || !range) return;
+          isSyncing = true;
+          for (const target of charts) {
+            if (target !== source) {
+              target.timeScale().setVisibleLogicalRange(range);
+            }
+          }
+          isSyncing = false;
+        };
+
+        charts.forEach(c => {
+          c.timeScale().subscribeVisibleLogicalRangeChange(syncHandler(c));
+        });
+
+      // 轮询相关变量
+      let poller;
+      let isPolling = false;
+
+      // 启动轮询函数
+      function startPolling() {
+        if (poller) {
+          clearInterval(poller);
+        }
+        
+        isPolling = true;
+        console.log('开始轮询，每5秒更新一次数据');
+        
+        // 更新按钮文本和状态
+        const loadBtn = document.getElementById('load');
+        loadBtn.textContent = '停止轮询';
+        loadBtn.disabled = false;
+        
+        poller = setInterval(async () => {
+          try {
+            // 仅重新加载最后 N 分钟也可，MVP全量即可
+            // 轮询更新时不重置视图缩放
+            await loadData(false);
+          } catch (error) {
+            console.error('轮询更新失败:', error);
+          }
+        }, 5000); // 每5秒轮询一次
+      }
+
+      // 停止轮询函数
+      function stopPolling() {
+        if (poller) {
+          clearInterval(poller);
+          poller = null;
+        }
+        isPolling = false;
+        console.log('停止轮询');
+        
+        // 更新按钮文本
+        const loadBtn = document.getElementById('load');
+        loadBtn.textContent = '加载数据';
+        loadBtn.disabled = false;
+      }
+
+      // 状态显示函数
+      function showStatus(message, type = 'info') {
+        const statusEl = document.getElementById('status');
+        statusEl.textContent = message;
+        statusEl.className = type;
+      }
+
+      // 加载数据函数
+      async function loadData(shouldFitContent = true) {
+        const symbol = document.getElementById('symbol').value.trim();
+        const date = document.getElementById('date').value;
+        const loadBtn = document.getElementById('load');
+        
+        if (!symbol) {
+          showStatus('请输入股票代码', 'error');
+          return;
+        }
+
+        try {
+          // 只有在非轮询状态下才禁用按钮和显示加载状态
+          if (!isPolling) {
+            loadBtn.disabled = true;
+            showStatus('正在加载数据...', 'info');
+          }
+          
+          const res = await fetch(`/api/ohlcv?symbol=${encodeURIComponent(symbol)}&date=${encodeURIComponent(date)}`);
+          
+          if (!res.ok) {
+            throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+          }
+          
+          const rows = await res.json();
+          
+          if (!Array.isArray(rows)) {
+            throw new Error('服务器返回的数据格式不正确');
+          }
+          
+          if (rows.length === 0) {
+            showStatus(`没有找到 ${symbol} 在 ${date} 的数据`, 'error');
+            series.setData([]);
+            return;
+          }
+
+          // 转换数据格式 - 修复时区问题
+          const candles = rows.map(r => {
+            // Lightweight Charts 不原生支持时区，需要手动调整时间戳
+            // 数据库中的时间是UTC时间，需要转换为本地时间显示
+            // 但是由于JavaScript的Date对象会自动处理时区，我们需要特殊处理
+            const utcDate = new Date(r.t);
+            // 获取UTC时间戳（秒）
+            const utcTimestamp = Math.floor(utcDate.getTime() / 1000);
+            // 对于Lightweight Charts，我们直接使用UTC时间戳，让浏览器处理显示
+            
+            return {
+              time: utcTimestamp,
+              open: Number(r.o),
+              high: Number(r.h),
+              low: Number(r.l),
+              close: Number(r.c),
+              volume: Number(r.v)
+            };
+          }).filter(candle => 
+            !isNaN(candle.open) && !isNaN(candle.high) && 
+            !isNaN(candle.low) && !isNaN(candle.close) &&
+            candle.open > 0 && candle.high > 0 && 
+            candle.low > 0 && candle.close > 0
+          );
+
+          if (candles.length === 0) {
+            showStatus('数据中没有有效的价格信息', 'error');
+            return;
+          }
+
+          // 设置数据到图表
+          series.setData(candles);
+          
+          // 设置移动平均线数据
+          const ma5Data = rows.map((r, i) => ({ time: candles[i].time, value: Number(r.ma5) })).filter(d => !isNaN(d.value) && d.value > 0);
+          const ma10Data = rows.map((r, i) => ({ time: candles[i].time, value: Number(r.ma10) })).filter(d => !isNaN(d.value) && d.value > 0);
+          const ma20Data = rows.map((r, i) => ({ time: candles[i].time, value: Number(r.ma20) })).filter(d => !isNaN(d.value) && d.value > 0);
+
+          ma5Series.setData(ma5Data);
+          ma10Series.setData(ma10Data);
+          ma20Series.setData(ma20Data);
+
+          // 设置成交量数据
+          const volumeData = candles.map(c => ({
+            time: c.time,
+            value: c.volume,
+            color: c.close >= c.open ? '#26a69a' : '#ef5350'
+          }));
+          volumeSeries.setData(volumeData);
+          
+          // Calculate and set MACD data
+          const macdData = calculateMACD(candles);
+          
+          const histogramData = macdData.map(d => ({
+            time: d.time,
+            value: d.macdBar,
+            color: d.macdBar >= 0 ? '#26a69a' : '#ef5350',
+          }));
+          
+          const fastData = macdData.map(d => ({
+            time: d.time,
+            value: d.dif,
+          }));
+          
+          const slowData = macdData.map(d => ({
+            time: d.time,
+            value: d.dea,
+          }));
+          
+          macdHistogramSeries.setData(histogramData);
+          macdFastSeries.setData(fastData);
+          macdSlowSeries.setData(slowData);
+
+          // Set EMA Series Data
+          const emaFastData = macdData.map(d => ({ time: d.time, value: d.emaFast }));
+          const emaSlowData = macdData.map(d => ({ time: d.time, value: d.emaSlow }));
+
+          emaFastSeries.setData(emaFastData);
+          emaSlowSeries.setData(emaSlowData);
+          
+          // Calculate and set RSI Data
+          const rsiData = calculateRSI(candles);
+          rsiSeries.setData(rsiData);
+
+          // 自动调整视图
+          if (shouldFitContent) {
+            chart.timeScale().fitContent();
+            // volumeChart 会通过 syncHandler 自动同步，不需要单独 fitContent
+            // 但为了保险，可以在短暂延迟后 fit 一次，或者依赖 sync
+          }
+          
+          showStatus(`成功加载 ${candles.length} 条K线数据`, 'success');
+          
+          // 如果不是轮询状态，则在首次加载成功后启动轮询
+          if (!isPolling) {
+            startPolling();
+          }
+          
+        } catch (error) {
+          console.error('加载数据失败:', error);
+          showStatus(`加载失败: ${error.message}`, 'error');
+        } finally {
+          // 只有在非轮询状态下才重新启用按钮
+          if (!isPolling) {
+            loadBtn.disabled = false;
+          }
+        }
+      }
+
+      // 修改加载按钮事件：支持停止/启动轮询
+      function handleLoadClick() {
+        if (isPolling) {
+          // 如果正在轮询，则停止轮询
+          stopPolling();
+          document.getElementById('load').textContent = '加载数据';
+          document.getElementById('load').disabled = false;
+        } else {
+          // 如果没有轮询，则加载数据并启动轮询
+          loadData();
+        }
+      }
+
+      // 绑定事件
+      document.getElementById('load').addEventListener('click', handleLoadClick);
+      
+      // MA Toggle 事件
+      document.getElementById('toggle-ma5').addEventListener('change', (e) => {
+        ma5Series.applyOptions({ visible: e.target.checked });
+      });
+      document.getElementById('toggle-ma10').addEventListener('change', (e) => {
+        ma10Series.applyOptions({ visible: e.target.checked });
+      });
+      document.getElementById('toggle-ma20').addEventListener('change', (e) => {
+        ma20Series.applyOptions({ visible: e.target.checked });
+      });
+
+      // EMA Toggle Events
+      document.getElementById('toggle-ema12').addEventListener('change', (e) => {
+        emaFastSeries.applyOptions({ visible: e.target.checked });
+      });
+      document.getElementById('toggle-ema26').addEventListener('change', (e) => {
+        emaSlowSeries.applyOptions({ visible: e.target.checked });
+      });
+
+      // Chart Toggle Logic
+      function updateChartLayout() {
+        const showVolume = document.getElementById('toggle-volume').checked;
+        const showMacd = document.getElementById('toggle-macd').checked;
+        const showRsi = document.getElementById('toggle-rsi').checked;
+        
+        const chartEl = document.getElementById('chart');
+        const volumeEl = document.getElementById('volume-chart');
+        const macdEl = document.getElementById('macd-chart');
+        const rsiEl = document.getElementById('rsi-chart');
+        
+        // Visibility
+        volumeEl.style.display = showVolume ? 'block' : 'none';
+        macdEl.style.display = showMacd ? 'block' : 'none';
+        rsiEl.style.display = showRsi ? 'block' : 'none';
+        
+        // Styling for borders and radius
+        // Reset all first
+        chartEl.style.borderRadius = '8px 8px 0 0';
+        chartEl.style.borderBottom = 'none';
+        
+        volumeEl.style.borderRadius = '0';
+        volumeEl.style.borderBottom = 'none';
+        
+        macdEl.style.borderRadius = '0';
+        macdEl.style.borderBottom = 'none';
+        
+        rsiEl.style.borderRadius = '0 0 8px 8px';
+        rsiEl.style.borderBottom = '1px solid #333';
+        
+        // Determine the last visible element
+        let lastVisible = chartEl;
+        if (showVolume) lastVisible = volumeEl;
+        if (showMacd) lastVisible = macdEl;
+        if (showRsi) lastVisible = rsiEl;
+        
+        // Apply bottom radius to the last visible element
+        if (lastVisible === chartEl) {
+          chartEl.style.borderRadius = '8px 8px 8px 8px';
+          chartEl.style.borderBottom = '1px solid #333';
+        } else if (lastVisible === volumeEl) {
+          volumeEl.style.borderRadius = '0 0 8px 8px';
+          volumeEl.style.borderBottom = '1px solid #333';
+        } else if (lastVisible === macdEl) {
+          macdEl.style.borderRadius = '0 0 8px 8px';
+          macdEl.style.borderBottom = '1px solid #333';
+        }
+      }
+
+      document.getElementById('toggle-volume').addEventListener('change', updateChartLayout);
+      document.getElementById('toggle-macd').addEventListener('change', updateChartLayout);
+      document.getElementById('toggle-rsi').addEventListener('change', updateChartLayout);
+
+      // 回车键加载
+      document.getElementById('symbol').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') loadData();
+      });
+      document.getElementById('date').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') loadData();
+      });
+
+      // 设置默认日期为今天
+      document.getElementById('date').valueAsDate = new Date();
+
+      // 页面加载完成后自动加载默认数据
+      window.addEventListener('load', () => {
+        // Initial layout update
+        updateChartLayout();
+        setTimeout(loadData, 500);
+      });
+
+      // Window resize handler
+      window.addEventListener('resize', () => {
+        const width = document.getElementById('chart').clientWidth;
+        chart.applyOptions({ width });
+        volumeChart.applyOptions({ width });
+        macdChart.applyOptions({ width });
+        rsiChart.applyOptions({ width });
+      });
+      
+      } // 结束 initChart 函数
+      
+      // 启动图表初始化
+      initChart();
+    </script>
+  </body>
+</html>
