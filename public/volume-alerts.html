@@ -221,6 +221,25 @@
             <h2 class="alerts-title">成交量提醒列表（最近）</h2>
         </div>
 
+        <!-- 系统设置面板 -->
+        <div class="config-panel" style="border-color: #007acc;">
+            <div class="config-header" style="background-color: #004470;">
+                <h3 style="color: white;">⚙️ 系统参数配置</h3>
+                <button id="toggle-sys-config" class="toggle-btn" style="color: white;">▼</button>
+            </div>
+            <div id="sys-config-content" class="config-content">
+                <div id="settings-container" class="config-row">
+                    <!-- Settings will be injected here -->
+                    <div class="loading">加载设置中...</div>
+                </div>
+                <div style="margin-top: 15px; display: flex; gap: 10px; align-items: center;">
+                    <button id="save-settings-btn" style="padding: 8px 16px; background: #007acc; border: none; color: white; border-radius: 4px; cursor: pointer;">保存配置</button>
+                    <button id="trigger-scan-btn" style="padding: 8px 16px; background: #2a2a2a; border: 1px solid #555; color: #ddd; border-radius: 4px; cursor: pointer;">立即扫描</button>
+                    <span id="save-status" style="margin-left: 10px; font-size: 0.9em;"></span>
+                </div>
+            </div>
+        </div>
+
         <!-- 筛选面板 -->
         <div class="config-panel">
             <div class="config-header">
@@ -284,6 +303,134 @@
             if (ratio >= 1) return 'amp-up';
             return 'amp-flat';
         }
+
+        // --- Settings Management ---
+        let currentSettings = {};
+
+        async function loadSettings() {
+            try {
+                const res = await fetch('/api/settings');
+                if (!res.ok) throw new Error('Failed to load settings');
+                const settings = await res.json();
+                
+                const container = document.getElementById('settings-container');
+                container.innerHTML = '';
+                currentSettings = {};
+
+                settings.forEach(s => {
+                    currentSettings[s.key] = s;
+                    
+                    const div = document.createElement('div');
+                    div.className = 'config-item';
+                    div.style.cssText = 'display: flex; flex-direction: column; margin-right: 20px; margin-bottom: 10px;';
+                    
+                    const label = document.createElement('label');
+                    label.textContent = s.description || s.key;
+                    label.style.marginBottom = '5px';
+                    label.style.fontSize = '0.9em';
+                    label.style.color = '#aaa';
+                    
+                    let input;
+                    if (s.value_type === 'boolean') {
+                        input = document.createElement('input');
+                        input.type = 'checkbox';
+                        input.checked = s.value;
+                    } else {
+                        input = document.createElement('input');
+                        input.type = 'number';
+                        input.value = s.value;
+                        input.style.padding = '5px';
+                        input.style.backgroundColor = '#333';
+                        input.style.border = '1px solid #555';
+                        input.style.color = 'white';
+                        input.style.borderRadius = '3px';
+                        
+                        if (s.value_type === 'float') input.step = '0.1';
+                        if (s.min_value !== null) input.min = s.min_value;
+                        if (s.max_value !== null) input.max = s.max_value;
+                    }
+                    input.id = `setting-${s.key}`;
+                    
+                    div.appendChild(label);
+                    div.appendChild(input);
+                    container.appendChild(div);
+                });
+            } catch (err) {
+                console.error(err);
+                document.getElementById('settings-container').innerHTML = '<div class="error">加载配置失败</div>';
+            }
+        }
+
+        async function saveSettings() {
+            const status = document.getElementById('save-status');
+            const saveBtn = document.getElementById('save-settings-btn');
+            
+            status.textContent = '保存中...';
+            status.style.color = '#aaa';
+            saveBtn.disabled = true;
+
+            try {
+                for (const key in currentSettings) {
+                    const setting = currentSettings[key];
+                    const input = document.getElementById(`setting-${key}`);
+                    let newValue;
+                    
+                    if (setting.value_type === 'boolean') {
+                        newValue = input.checked;
+                    } else {
+                        newValue = input.value;
+                    }
+
+                    // Simple check if changed (in a real app, do deep check or dirty flag)
+                    // Here we just update all for simplicity or check against loaded
+                    if (String(newValue) !== String(setting.value)) {
+                        const res = await fetch(`/api/settings/${key}`, {
+                            method: 'PUT',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ value: newValue })
+                        });
+                        
+                        if (!res.ok) {
+                            const err = await res.json();
+                            throw new Error(err.error || `Failed to update ${key}`);
+                        }
+                    }
+                }
+                status.textContent = '保存成功!';
+                status.style.color = '#4caf50';
+                await loadSettings(); // Reload to refresh state
+            } catch (err) {
+                console.error(err);
+                status.textContent = '保存失败: ' + err.message;
+                status.style.color = '#ff5252';
+            } finally {
+                saveBtn.disabled = false;
+                setTimeout(() => { if(status.textContent === '保存成功!') status.textContent = ''; }, 3000);
+            }
+        }
+
+        async function triggerScan() {
+            const status = document.getElementById('save-status');
+            const btn = document.getElementById('trigger-scan-btn');
+            
+            btn.disabled = true;
+            status.textContent = '正在触发扫描...';
+            
+            try {
+                const res = await fetch('/api/settings/trigger-volume-scan', { method: 'POST' });
+                if (!res.ok) throw new Error('Request failed');
+                status.textContent = '扫描已在后台启动';
+                status.style.color = '#4caf50';
+            } catch (err) {
+                status.textContent = '触发失败';
+                status.style.color = '#ff5252';
+            } finally {
+                btn.disabled = false;
+                setTimeout(() => status.textContent = '', 3000);
+            }
+        }
+
+        // --- End Settings Management ---
 
         // 渲染提醒列表
         function renderAlerts(alerts) {
@@ -350,12 +497,12 @@
                 return ratio >= threshold;
             });
         }
-
+        
         // 加载提醒数据
         async function loadAlerts() {
             try {
                 // 调用新接口
-                const response = await fetch('/api/volume-alerts-data?limit=50');
+                const response = await fetch('/api/volume-alerts-data?limit=200');
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -433,6 +580,23 @@
 
             // Initial status update
             updateConfig();
+
+            // Settings UI Init
+            loadSettings();
+            document.getElementById('save-settings-btn').addEventListener('click', saveSettings);
+            document.getElementById('trigger-scan-btn').addEventListener('click', triggerScan);
+            
+            const toggleSysBtn = document.getElementById('toggle-sys-config');
+            const sysContent = document.getElementById('sys-config-content');
+            toggleSysBtn.addEventListener('click', () => {
+                if (sysContent.classList.contains('collapsed')) {
+                    sysContent.classList.remove('collapsed');
+                    toggleSysBtn.textContent = '▼';
+                } else {
+                    sysContent.classList.add('collapsed');
+                    toggleSysBtn.textContent = '▶';
+                }
+            });
         }
     </script>
 </body>

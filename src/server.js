@@ -3,6 +3,7 @@ const express = require('express');
 const path = require('path');
 const { Pool } = require('pg');
 const { getFlexibleHills } = require('./scan-flexible-hills');
+const ConfigManager = require('./config-manager');
 const app = express();
 
 // app.use(compression());
@@ -27,6 +28,9 @@ const pool = new Pool({
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000, // Fail fast if no connection available
 });
+
+// Initialize ConfigManager
+const config = new ConfigManager(pool);
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
@@ -147,6 +151,39 @@ app.get('/api/ohlcv', async (req, res) => {
     console.error(e);
     return res.status(500).json({ error: 'internal_error' });
   }
+});
+
+// === Settings API ===
+app.get('/api/settings', async (req, res) => {
+  const settings = await config.getAllSettings();
+  res.json(settings);
+});
+
+app.put('/api/settings/:key', express.json(), async (req, res) => {
+  try {
+    const { key } = req.params;
+    const { value } = req.body;
+    const changedBy = req.query.user || 'admin'; // In real app, get from auth token
+
+    const result = await config.update(key, value, changedBy);
+    
+    // If volume parameters changed, we might want to trigger a scan immediately?
+    // For now, let's just return success.
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+app.post('/api/settings/trigger-volume-scan', async (req, res) => {
+    try {
+        console.log('[API] Triggering manual volume scan...');
+        // We run it asynchronously to not block the response
+        scanAllVolumeAlerts().catch(err => console.error('Manual scan failed:', err));
+        res.json({ message: 'Volume scan triggered in background.' });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to trigger scan' });
+    }
 });
 
 
@@ -561,6 +598,11 @@ async function ensureVolumeAlertSchema() {
 async function scanAllVolumeAlerts() {
   await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
   await ensureVolumeAlertSchema();
+
+  // Load dynamic configuration
+  const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
+  const VOLUME_RATIO_THRESHOLD = await config.get('volume_ratio_threshold', 1.5);
+  const VOLUME_Z_THRESHOLD = await config.get('volume_z_threshold', 2.0);
 
   const today = new Date().toISOString().split('T')[0];
   const scanTs = new Date().toISOString();
