@@ -228,6 +228,26 @@
                 <button id="toggle-sys-config" class="toggle-btn" style="color: white;">▼</button>
             </div>
             <div id="sys-config-content" class="config-content">
+                <div id="checkpoints-editor" style="margin-bottom: 20px; border-bottom: 1px solid #444; padding-bottom: 15px;">
+                    <h4 style="color: #ddd; margin-bottom: 10px;">时间检查点配置 (Time Checkpoints)</h4>
+                    <table id="checkpoints-table" style="width: 100%; text-align: left; border-collapse: collapse; color: #ddd;">
+                        <thead>
+                            <tr style="border-bottom: 1px solid #555;">
+                                <th style="padding: 5px;">时间 (分钟)</th>
+                                <th style="padding: 5px;">预期完成 %</th>
+                                <th style="padding: 5px;">标签 (Label)</th>
+                                <th style="padding: 5px;">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div style="margin-top: 10px; display: flex; gap: 10px;">
+                        <input type="number" id="new-cp-mins" placeholder="分钟 (e.g. 120)" style="width: 100px; padding: 5px; background: #333; border: 1px solid #555; color: white;">
+                        <input type="number" id="new-cp-pct" placeholder="预期% (0.3)" step="0.01" style="width: 100px; padding: 5px; background: #333; border: 1px solid #555; color: white;">
+                        <input type="text" id="new-cp-label" placeholder="标签" style="width: 150px; padding: 5px; background: #333; border: 1px solid #555; color: white;">
+                        <button id="add-cp-btn" style="padding: 5px 10px; background: #007acc; color: white; border: none; cursor: pointer;">添加</button>
+                    </div>
+                </div>
                 <div id="settings-container" class="config-row">
                     <!-- Settings will be injected here -->
                     <div class="loading">加载设置中...</div>
@@ -248,15 +268,15 @@
             </div>
             <div id="config-content" class="config-content">
                 <div class="config-row">
-                    <label for="threshold">最小量比阈值：</label>
-                    <input type="number" id="threshold" min="0" step="0.1" placeholder="0.5" value="0.5">
+                    <label for="threshold">最小差距百分比：</label>
+                    <input type="number" id="threshold" min="0" step="0.01" placeholder="0.1" value="0.1">
                     <label for="enable-filter">
                         <input type="checkbox" id="enable-filter" checked>
                         启用筛选
                     </label>
                 </div>
                 <div class="config-status">
-                    <span id="filter-status">筛选状态: 已启用，阈值 0.5</span>
+                    <span id="filter-status">筛选状态: 已启用，阈值 0.1</span>
                 </div>
             </div>
         </div>
@@ -306,6 +326,7 @@
 
         // --- Settings Management ---
         let currentSettings = {};
+        let timeCheckpoints = [];
 
         async function loadSettings() {
             try {
@@ -316,9 +337,19 @@
                 const container = document.getElementById('settings-container');
                 container.innerHTML = '';
                 currentSettings = {};
+                timeCheckpoints = [];
 
                 settings.forEach(s => {
                     currentSettings[s.key] = s;
+                    
+                    if (s.key === 'time_checkpoints') {
+                        timeCheckpoints = s.value;
+                        if (typeof timeCheckpoints === 'string') {
+                             try { timeCheckpoints = JSON.parse(timeCheckpoints); } catch(e) {}
+                        }
+                        renderCheckpointsTable();
+                        return; // Don't render in generic list
+                    }
                     
                     const div = document.createElement('div');
                     div.className = 'config-item';
@@ -361,6 +392,52 @@
             }
         }
 
+        function renderCheckpointsTable() {
+            const tbody = document.querySelector('#checkpoints-table tbody');
+            tbody.innerHTML = '';
+            
+            // Sort by elapsed_minutes
+            timeCheckpoints.sort((a, b) => a.elapsed_minutes - b.elapsed_minutes);
+
+            timeCheckpoints.forEach((cp, index) => {
+                const tr = document.createElement('tr');
+                tr.style.borderBottom = '1px solid #333';
+                tr.innerHTML = `
+                    <td style="padding: 8px;">${cp.elapsed_minutes}</td>
+                    <td style="padding: 8px;">${(cp.expected_pct * 100).toFixed(0)}%</td>
+                    <td style="padding: 8px;">${cp.label || ''}</td>
+                    <td style="padding: 8px;">
+                        <button onclick="deleteCheckpoint(${index})" style="color: #ff5252; background: none; border: none; cursor: pointer;">删除</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        window.deleteCheckpoint = function(index) {
+            timeCheckpoints.splice(index, 1);
+            renderCheckpointsTable();
+        };
+
+        document.getElementById('add-cp-btn').addEventListener('click', () => {
+            const mins = parseInt(document.getElementById('new-cp-mins').value);
+            const pct = parseFloat(document.getElementById('new-cp-pct').value);
+            const label = document.getElementById('new-cp-label').value;
+
+            if (!mins || isNaN(pct)) {
+                alert('请输入有效的时间和百分比');
+                return;
+            }
+
+            timeCheckpoints.push({ elapsed_minutes: mins, expected_pct: pct, label: label });
+            renderCheckpointsTable();
+            
+            // Clear inputs
+            document.getElementById('new-cp-mins').value = '';
+            document.getElementById('new-cp-pct').value = '';
+            document.getElementById('new-cp-label').value = '';
+        });
+
         async function saveSettings() {
             const status = document.getElementById('save-status');
             const saveBtn = document.getElementById('save-settings-btn');
@@ -370,35 +447,39 @@
             saveBtn.disabled = true;
 
             try {
+                // Save Checkpoints
+                await fetch('/api/settings/time_checkpoints', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ value: timeCheckpoints })
+                });
+
+                // Save other settings
                 for (const key in currentSettings) {
+                    if (key === 'time_checkpoints') continue;
+                    
                     const setting = currentSettings[key];
                     const input = document.getElementById(`setting-${key}`);
+                    if (!input) continue;
+
                     let newValue;
-                    
                     if (setting.value_type === 'boolean') {
                         newValue = input.checked;
                     } else {
                         newValue = input.value;
                     }
 
-                    // Simple check if changed (in a real app, do deep check or dirty flag)
-                    // Here we just update all for simplicity or check against loaded
                     if (String(newValue) !== String(setting.value)) {
-                        const res = await fetch(`/api/settings/${key}`, {
+                        await fetch(`/api/settings/${key}`, {
                             method: 'PUT',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ value: newValue })
                         });
-                        
-                        if (!res.ok) {
-                            const err = await res.json();
-                            throw new Error(err.error || `Failed to update ${key}`);
-                        }
                     }
                 }
                 status.textContent = '保存成功!';
                 status.style.color = '#4caf50';
-                await loadSettings(); // Reload to refresh state
+                await loadSettings(); 
             } catch (err) {
                 console.error(err);
                 status.textContent = '保存失败: ' + err.message;
@@ -450,24 +531,46 @@
             }
 
             alertsList.innerHTML = filteredAlerts.map(alert => {
-                const ratio = parseFloat(alert.volume_ratio);
-                const ruleId = alert.rule_id || 'volume_surge';
-                const ratioText = `量比 ${(ratio * 100).toFixed(0)}%`;
-                const ratioClass = getClass(ratio, ruleId);
+                // Parse Checkpoint Info
+                // rule_id: checkpoint_{minutes}min_{pct}pct
+                const actualPct = parseFloat(alert.volume_ratio);
+                const ruleId = alert.rule_id || '';
+                
+                let label = ruleId;
+                let expectedPct = 0;
+                let minutes = 0;
+                
+                if (ruleId.startsWith('checkpoint_')) {
+                    const parts = ruleId.split('_');
+                    // parts[1] like "120min", parts[2] like "30pct"
+                    minutes = parseInt(parts[1]);
+                    expectedPct = parseInt(parts[2]) / 100;
+                    
+                    // Try to find label in current checkpoints
+                    const cp = timeCheckpoints.find(c => c.elapsed_minutes === minutes);
+                    if (cp) label = cp.label;
+                    else label = `开市${minutes}分钟`;
+                } else if (RULE_LABELS[ruleId]) {
+                    label = RULE_LABELS[ruleId];
+                }
 
-                const icon = getRuleIcon(ruleId);
-                const ruleLabel = getRuleLabel(ruleId);
+                const gap = expectedPct - actualPct;
+                const gapText = (gap * 100).toFixed(1) + '%';
+                
+                // Color based on gap severity?
+                // If gap is large, maybe red?
+                const gapClass = gap > 0.1 ? 'amp-down' : 'amp-flat';
+
                 const time = formatBeijingTime(alert.created_at);
 
                 return `
                     <li class="alert-item">
                         <span class="alert-symbol">${alert.symbol}</span>
                         <span class="alert-time">${time}</span>
-                        <span class="alert-amplitude ${ratioClass}">${ratioText}</span>
-                        <span class="alert-direction">${icon}</span>
+                        <span class="alert-amplitude ${gapClass}">差距: ${gapText}</span>
                         <span class="alert-info">
-                            [${ruleLabel}] 当前量: ${Number(alert.current_cum_vol).toLocaleString()} /
-                            均量: ${Number(alert.avg_daily_vol).toLocaleString()}
+                            [${label}] 实际: ${(actualPct*100).toFixed(1)}% / 预期: ${(expectedPct*100).toFixed(0)}%
+                            (当前量: ${Number(alert.current_cum_vol).toLocaleString()})
                         </span>
                     </li>
                 `;
@@ -486,15 +589,21 @@
             let threshold = parseFloat(thresholdInput.value);
             
             if (isNaN(threshold) || threshold < 0) {
-                console.warn('Invalid threshold, using default 0.5');
-                threshold = 0.5;
-                thresholdInput.value = 0.5;
+                threshold = 0.1;
             }
             
             return alerts.filter(alert => {
-                const ratio = parseFloat(alert.volume_ratio);
-                if (isNaN(ratio)) return false;
-                return ratio >= threshold;
+                const actualPct = parseFloat(alert.volume_ratio);
+                const ruleId = alert.rule_id || '';
+                if (!ruleId.startsWith('checkpoint_')) return true; // Keep old alerts or non-checkpoint alerts
+                
+                const parts = ruleId.split('_');
+                if (parts.length < 3) return true;
+                
+                const expectedPct = parseInt(parts[2]) / 100;
+                const gap = expectedPct - actualPct;
+                
+                return gap >= threshold;
             });
         }
         

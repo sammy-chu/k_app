@@ -287,7 +287,7 @@ app.get('/api/hill-alerts', async (req, res) => {
 // Alert monitoring configuration and functions
 const ALERT_THRESHOLD_PCT = Number(process.env.ALERT_THRESHOLD_PCT || 0.01);
 const VOLUME_RATIO_THRESHOLD = Number(process.env.VOLUME_RATIO_THRESHOLD || 1.5);
-const VOLUME_SCAN_INTERVAL = Number(process.env.VOLUME_SCAN_INTERVAL || 60000);
+const VOLUME_SCAN_INTERVAL = Number(process.env.VOLUME_SCAN_INTERVAL || 300000); // 5 minutes
 const VOLUME_HISTORY_DAYS = Number(process.env.VOLUME_HISTORY_DAYS || 20);
 const VOLUME_Z_THRESHOLD = Number(process.env.VOLUME_Z_THRESHOLD || 2.0);
 
@@ -592,6 +592,17 @@ async function ensureVolumeAlertSchema() {
       END IF;
     END $$
   `);
+  
+  // Ensure time_checkpoints setting exists
+  await pool.query(`
+    INSERT INTO app_settings (key, value, value_type, description)
+    VALUES ('time_checkpoints', 
+            '[{"elapsed_minutes": 120, "expected_pct": 0.30, "label": "开市2小时"}, {"elapsed_minutes": 180, "expected_pct": 0.50, "label": "开市3小时"}, {"elapsed_minutes": 240, "expected_pct": 0.75, "label": "收盘前"}]', 
+            'json', 
+            'Time checkpoints for volume alerts')
+    ON CONFLICT (key) DO NOTHING
+  `);
+
   volumeSchemaReady = true;
 }
 
@@ -601,8 +612,17 @@ async function scanAllVolumeAlerts() {
 
   // Load dynamic configuration
   const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
-  const VOLUME_RATIO_THRESHOLD = await config.get('volume_ratio_threshold', 1.5);
-  const VOLUME_Z_THRESHOLD = await config.get('volume_z_threshold', 2.0);
+  
+  // Load time checkpoints
+  let timeCheckpoints = await config.get('time_checkpoints', []);
+  if (!Array.isArray(timeCheckpoints)) {
+      console.warn('[VolumeMonitor] time_checkpoints is not an array, using defaults');
+      timeCheckpoints = [
+        { elapsed_minutes: 120, expected_pct: 0.30, label: "开市2小时" }, 
+        { elapsed_minutes: 180, expected_pct: 0.50, label: "开市3小时" }, 
+        { elapsed_minutes: 240, expected_pct: 0.75, label: "收盘前" }
+      ];
+  }
 
   const today = new Date().toISOString().split('T')[0];
   const scanTs = new Date().toISOString();
@@ -637,143 +657,76 @@ async function scanAllVolumeAlerts() {
   }
   lastVolumeScanAt = scanTs;
 
-  // 2. 计算交易时间比例，盘前不足 ~30 分钟则跳过告警扫描
-  const elapsedPct = getMarketElapsedPct();
-  console.log(`[VolumeMonitor] elapsedPct=${elapsedPct.toFixed(4)}`);
-  if (elapsedPct < MIN_ELAPSED_PCT) return;
+  // 2. Calculate elapsed minutes
+  const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
+  const currentMins = nowET.getHours() * 60 + nowET.getMinutes();
+  const elapsedMinutes = currentMins - MARKET_OPEN_MINS; 
 
-  // 3. 批量扫描（时间加权量比 + Z-score + 截尾均值，日级去重）
-  const surgeSql = `
-    WITH hist_ranked AS (
-      SELECT symbol,
-             daily_volume,
-             PERCENT_RANK() OVER (PARTITION BY symbol ORDER BY daily_volume) AS pct_rank,
-             COUNT(*) OVER (PARTITION BY symbol) AS total_days
-      FROM tos_daily_volume
-      WHERE trade_date >= ($1::date - $3 * INTERVAL '1 day')
-        AND trade_date < $1::date
-    ),
-    hist AS (
-        SELECT symbol,
-               AVG(daily_volume) AS avg_vol,
-               COALESCE(STDDEV(daily_volume), 0) AS std_vol
-        FROM hist_ranked
-        WHERE total_days >= 1
-          AND pct_rank >= 0.1 AND pct_rank <= 0.9
-        GROUP BY symbol
-      ),
-    today_vol AS (
-      SELECT symbol, daily_volume AS cum_vol
-      FROM tos_daily_volume
-      WHERE trade_date = $1::date
-    )
-    INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol, rule_id, created_at)
-    SELECT t.symbol,
-           $1::date::timestamp AS bucket,
-           t.cum_vol / NULLIF(h.avg_vol * $4, 0) AS volume_ratio,
-           t.cum_vol,
-           ROUND(h.avg_vol, 2),
-           'volume_surge',
-           now()
-    FROM today_vol t
-    JOIN hist h USING (symbol)
-    WHERE h.avg_vol > 0
-      AND (
-        t.cum_vol / NULLIF(h.avg_vol * $4, 0) >= $2::numeric
-        OR
-        (h.std_vol > 0 AND (t.cum_vol / $4 - h.avg_vol) / h.std_vol >= $5)
-      )
-    ON CONFLICT (symbol, bucket, rule_id)
-      DO UPDATE SET volume_ratio = EXCLUDED.volume_ratio,
-                    current_cum_vol = EXCLUDED.current_cum_vol,
-                    avg_daily_vol = EXCLUDED.avg_daily_vol,
-                    updated_at = now()
-      RETURNING symbol;
-  `;
+  console.log(`[VolumeMonitor] elapsedMinutes=${elapsedMinutes}`);
+  if (elapsedMinutes <= 0) return; // Pre-market, skip
 
-  const surgeRes = await pool.query(surgeSql, [
-    today, VOLUME_RATIO_THRESHOLD, VOLUME_HISTORY_DAYS, elapsedPct, VOLUME_Z_THRESHOLD
-  ]);
+  // 3. Checkpoints Logic
+  let totalTriggered = 0;
+  
+  for (const cp of timeCheckpoints) {
+      // Check if time window reached
+      if (elapsedMinutes < cp.elapsed_minutes) continue;
 
-  // 4. 极端缩量告警（至少过半天才有意义）
-  let shrinkCount = 0;
-  if (elapsedPct >= 0.5) {
-    const shrinkSql = `
-      WITH hist_ranked AS (
-        SELECT symbol, daily_volume,
-               PERCENT_RANK() OVER (PARTITION BY symbol ORDER BY daily_volume) AS pct_rank,
-               COUNT(*) OVER (PARTITION BY symbol) AS total_days
-        FROM tos_daily_volume
-        WHERE trade_date >= ($1::date - $2::int * INTERVAL '1 day') AND trade_date < $1::date
-      ),
-      hist AS (
-        SELECT symbol, AVG(daily_volume) AS avg_vol
-        FROM hist_ranked
-        WHERE total_days >= 1 AND pct_rank >= 0.1 AND pct_rank <= 0.9
-        GROUP BY symbol
-      ),
-      today_vol AS (
-        SELECT symbol, daily_volume AS cum_vol FROM tos_daily_volume WHERE trade_date = $1::date
-      )
-      INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol, rule_id, created_at)
-      SELECT t.symbol, $1::date::timestamp, t.cum_vol / NULLIF(h.avg_vol * $3, 0),
-             t.cum_vol, ROUND(h.avg_vol, 2), 'volume_shrink', now()
-      FROM today_vol t JOIN hist h USING (symbol)
-      WHERE h.avg_vol > 0 AND t.cum_vol / NULLIF(h.avg_vol * $3, 0) < 0.3
-      ON CONFLICT (symbol, bucket, rule_id)
-      DO UPDATE SET volume_ratio = EXCLUDED.volume_ratio,
-                    current_cum_vol = EXCLUDED.current_cum_vol,
-                    avg_daily_vol = EXCLUDED.avg_daily_vol,
-                    updated_at = now()
-      RETURNING symbol;
-    `;
-    const shrinkRes = await pool.query(shrinkSql, [today, VOLUME_HISTORY_DAYS, elapsedPct]);
-    shrinkCount = shrinkRes.rows.length;
+      // Construct rule_id
+      const ruleId = `checkpoint_${cp.elapsed_minutes}min_${Math.round(cp.expected_pct*100)}pct`;
+
+      const sql = `
+        WITH hist_ranked AS (
+          SELECT symbol,
+                 daily_volume,
+                 PERCENT_RANK() OVER (PARTITION BY symbol ORDER BY daily_volume) AS pct_rank,
+                 COUNT(*) OVER (PARTITION BY symbol) AS total_days
+          FROM tos_daily_volume
+          WHERE trade_date >= ($1::date - $2 * INTERVAL '1 day')
+            AND trade_date < $1::date
+        ),
+        hist AS (
+            SELECT symbol,
+                   AVG(daily_volume) AS avg_vol
+            FROM hist_ranked
+            WHERE total_days >= 1
+              AND pct_rank >= 0.1 AND pct_rank <= 0.9
+            GROUP BY symbol
+          ),
+        today_vol AS (
+          SELECT symbol, daily_volume AS cum_vol
+          FROM tos_daily_volume
+          WHERE trade_date = $1::date
+        )
+        INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol, rule_id, created_at)
+        SELECT t.symbol,
+               $1::date::timestamp AS bucket,
+               t.cum_vol / NULLIF(h.avg_vol, 0) AS volume_ratio,
+               t.cum_vol,
+               ROUND(h.avg_vol, 2),
+               $3, -- rule_id
+               now()
+        FROM today_vol t
+        JOIN hist h USING (symbol)
+        WHERE h.avg_vol > 0
+          AND (t.cum_vol / NULLIF(h.avg_vol, 0)) < $4::numeric
+        ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
+        RETURNING symbol;
+      `;
+
+      try {
+          const res = await pool.query(sql, [today, VOLUME_HISTORY_DAYS, ruleId, cp.expected_pct]);
+          totalTriggered += res.rowCount;
+          if (res.rowCount > 0) {
+              console.log(`[VolumeMonitor] Checkpoint ${cp.label} (${ruleId}) triggered for ${res.rowCount} symbols`);
+          }
+      } catch (err) {
+          console.error(`[VolumeMonitor] Error checking checkpoint ${cp.label}:`, err);
+      }
   }
-
-  // 5. 连续放量告警（仅收盘后检测）
-  let consecutiveCount = 0;
-  if (elapsedPct >= 1.0) {
-    const consecutiveSql = `
-      WITH hist_ranked AS (
-        SELECT symbol, daily_volume,
-               PERCENT_RANK() OVER (PARTITION BY symbol ORDER BY daily_volume) AS pct_rank,
-               COUNT(*) OVER (PARTITION BY symbol) AS total_days
-        FROM tos_daily_volume
-        WHERE trade_date >= ($1::date - $2::int * INTERVAL '1 day') AND trade_date < $1::date
-      ),
-      hist AS (
-        SELECT symbol, AVG(daily_volume) AS avg_vol
-        FROM hist_ranked
-        WHERE total_days >= 1 AND pct_rank >= 0.1 AND pct_rank <= 0.9
-        GROUP BY symbol
-      )
-      INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol, rule_id, created_at)
-      SELECT d1.symbol, $1::date::timestamp,
-             d1.daily_volume / NULLIF(h.avg_vol, 0),
-             d1.daily_volume, ROUND(h.avg_vol, 2), 'consecutive_high', now()
-      FROM tos_daily_volume d1
-      JOIN tos_daily_volume d2 ON d1.symbol = d2.symbol AND d2.trade_date = ($1::date - INTERVAL '1 day')
-      JOIN tos_daily_volume d3 ON d1.symbol = d3.symbol AND d3.trade_date = ($1::date - INTERVAL '2 days')
-      JOIN hist h ON d1.symbol = h.symbol
-      WHERE d1.trade_date = $1::date
-        AND d1.daily_volume > h.avg_vol * 1.5
-        AND d2.daily_volume > h.avg_vol * 1.5
-        AND d3.daily_volume > h.avg_vol * 1.5
-      ON CONFLICT (symbol, bucket, rule_id)
-      DO UPDATE SET volume_ratio = EXCLUDED.volume_ratio,
-                    current_cum_vol = EXCLUDED.current_cum_vol,
-                    avg_daily_vol = EXCLUDED.avg_daily_vol,
-                    updated_at = now()
-      RETURNING symbol;
-    `;
-    const consRes = await pool.query(consecutiveSql, [today, VOLUME_HISTORY_DAYS]);
-    consecutiveCount = consRes.rows.length;
-  }
-
-  const total = surgeRes.rows.length + shrinkCount + consecutiveCount;
-  if (total > 0) {
-    console.log(`[VolumeMonitor] Upserted ${surgeRes.rows.length} surge, ${shrinkCount} shrink, ${consecutiveCount} consecutive`);
+  
+  if (totalTriggered > 0) {
+      console.log(`[VolumeMonitor] Total alerts triggered: ${totalTriggered}`);
   }
 }
 

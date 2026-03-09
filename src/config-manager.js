@@ -80,6 +80,17 @@ class ConfigManager {
         if (isNaN(validatedValue)) throw new Error(`Value must be a number.`);
       } else if (value_type === 'boolean') {
         validatedValue = String(newValue).toLowerCase() === 'true';
+      } else if (value_type === 'json') {
+        if (typeof newValue === 'string') {
+          try {
+            JSON.parse(newValue); // validate
+            validatedValue = newValue;
+          } catch (e) {
+            throw new Error('Value must be a valid JSON string');
+          }
+        } else {
+          validatedValue = JSON.stringify(newValue);
+        }
       }
 
       if (min_value !== null && validatedValue < parseFloat(min_value)) {
@@ -128,6 +139,7 @@ class ConfigManager {
     if (type === 'int') return parseInt(value, 10);
     if (type === 'float') return parseFloat(value);
     if (type === 'boolean') return value.toLowerCase() === 'true';
+    if (type === 'json') return JSON.parse(value);
     return value;
   }
   
