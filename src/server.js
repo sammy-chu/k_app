@@ -292,7 +292,7 @@ const VOLUME_HISTORY_DAYS = Number(process.env.VOLUME_HISTORY_DAYS || 20);
 const VOLUME_Z_THRESHOLD = Number(process.env.VOLUME_Z_THRESHOLD || 2.0);
 
 // 美股交易时段（ET 时区）
-const MARKET_OPEN_MINS = 9 * 60 + 30;   // 09:30 ET
+const MARKET_OPEN_MINS = 8 * 60; // 08:00 Beijing Time = 480 mins
 const MARKET_CLOSE_MINS = 16 * 60;       // 16:00 ET
 const TOTAL_MARKET_MINS = MARKET_CLOSE_MINS - MARKET_OPEN_MINS; // 390 分钟
 const MIN_ELAPSED_PCT = 0.08;            // 至少经过 ~30 分钟才开始检测
@@ -612,6 +612,7 @@ async function scanAllVolumeAlerts() {
 
   // Load dynamic configuration
   const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
+  console.log(`[VolumeMonitor] Running scan with history=${VOLUME_HISTORY_DAYS}d`);
   
   // Load time checkpoints
   let timeCheckpoints = await config.get('time_checkpoints', []);
@@ -657,12 +658,24 @@ async function scanAllVolumeAlerts() {
   }
   lastVolumeScanAt = scanTs;
 
-  // 2. Calculate elapsed minutes
-  const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
-  const currentMins = nowET.getHours() * 60 + nowET.getMinutes();
+  // 2. Calculate elapsed minutes (Beijing Time 08:00 - 16:00)
+  const now = new Date();
+  const nowBeijing = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+  
+  // Weekend check (Saturday/Sunday Beijing Time)
+  const day = nowBeijing.getDay();
+  // if (day === 0 || day === 6) {
+  //   console.log('[VolumeMonitor] Weekend (Saturday/Sunday), skipping scan');
+  //   return;
+  // }
+  if (day === 0 || day === 6) {
+    console.log('[VolumeMonitor] Weekend detected but continuing for testing/verification purposes.');
+  }
+
+  const currentMins = nowBeijing.getHours() * 60 + nowBeijing.getMinutes();
   const elapsedMinutes = currentMins - MARKET_OPEN_MINS; 
 
-  console.log(`[VolumeMonitor] elapsedMinutes=${elapsedMinutes}`);
+  console.log(`[VolumeMonitor] Beijing Time: ${nowBeijing.toLocaleTimeString()}, elapsedMinutes=${elapsedMinutes}`);
   if (elapsedMinutes <= 0) return; // Pre-market, skip
 
   // 3. Checkpoints Logic
@@ -709,7 +722,7 @@ async function scanAllVolumeAlerts() {
         FROM today_vol t
         JOIN hist h USING (symbol)
         WHERE h.avg_vol > 0
-          AND (t.cum_vol / NULLIF(h.avg_vol, 0)) < $4::numeric
+          AND (t.cum_vol / NULLIF(h.avg_vol, 0)) >= $4::numeric
         ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
         RETURNING symbol;
       `;
@@ -785,7 +798,7 @@ app.get('/hill-alerts', (req, res) => {
 // 在静态服务与监听之前启动监控（或?listen 之后皆可?
 startAlertMonitor();
 console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
-console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, history=${VOLUME_HISTORY_DAYS}d`);
+console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, default_history=${VOLUME_HISTORY_DAYS}d`);
 
 const PORT = process.env.PORT || 8889;
 const HOST = process.env.HOST || '0.0.0.0';

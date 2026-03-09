@@ -548,64 +548,72 @@
                     
                     // Try to find label in current checkpoints
                     const cp = timeCheckpoints.find(c => c.elapsed_minutes === minutes);
-                    if (cp) label = cp.label;
-                    else label = `开市${minutes}分钟`;
-                } else if (RULE_LABELS[ruleId]) {
-                    label = RULE_LABELS[ruleId];
-                }
+                if (cp) label = cp.label;
+                else label = `开市${minutes}分钟`;
+            } else if (RULE_LABELS[ruleId]) {
+                label = RULE_LABELS[ruleId];
+            }
 
-                const gap = expectedPct - actualPct;
-                const gapText = (gap * 100).toFixed(1) + '%';
-                
-                // Color based on gap severity?
-                // If gap is large, maybe red?
-                const gapClass = gap > 0.1 ? 'amp-down' : 'amp-flat';
+            const excess = actualPct - expectedPct;
+            const excessText = (excess * 100).toFixed(1) + '%';
+            
+            // Color based on excess?
+            // If excess is large, maybe green/up?
+            const excessClass = 'amp-up';
 
-                const time = formatBeijingTime(alert.created_at);
+            const time = formatBeijingTime(alert.created_at);
 
-                return `
-                    <li class="alert-item">
-                        <span class="alert-symbol">${alert.symbol}</span>
-                        <span class="alert-time">${time}</span>
-                        <span class="alert-amplitude ${gapClass}">差距: ${gapText}</span>
-                        <span class="alert-info">
-                            [${label}] 实际: ${(actualPct*100).toFixed(1)}% / 预期: ${(expectedPct*100).toFixed(0)}%
-                            (当前量: ${Number(alert.current_cum_vol).toLocaleString()})
-                        </span>
-                    </li>
-                `;
-            }).join('');
+            return `
+                <li class="alert-item">
+                    <span class="alert-symbol">${alert.symbol}</span>
+                    <span class="alert-time">${time}</span>
+                    <span class="alert-amplitude ${excessClass}">超出: ${excessText}</span>
+                    <span class="alert-info">
+                        [${label}] 已达日均量的 ${(actualPct*100).toFixed(1)}% (目标 ${(expectedPct*100).toFixed(0)}%) ✓
+                        (当前量: ${Number(alert.current_cum_vol).toLocaleString()})
+                    </span>
+                </li>
+            `;
+        }).join('');
+    }
+
+    // 应用筛选
+    function applyFilter(alerts) {
+        const enableFilter = document.getElementById('enable-filter').checked;
+        const thresholdInput = document.getElementById('threshold');
+        let threshold = parseFloat(thresholdInput.value);
+        
+        if (isNaN(threshold) || threshold < 0) {
+            threshold = 0.0; // Default 0 if invalid
         }
 
-        // 应用筛选
-        function applyFilter(alerts) {
-            const enableFilter = document.getElementById('enable-filter').checked;
-            
-            if (!enableFilter) {
-                return alerts;
-            }
-            
-            const thresholdInput = document.getElementById('threshold');
-            let threshold = parseFloat(thresholdInput.value);
-            
-            if (isNaN(threshold) || threshold < 0) {
-                threshold = 0.1;
-            }
-            
-            return alerts.filter(alert => {
-                const actualPct = parseFloat(alert.volume_ratio);
-                const ruleId = alert.rule_id || '';
-                if (!ruleId.startsWith('checkpoint_')) return true; // Keep old alerts or non-checkpoint alerts
-                
-                const parts = ruleId.split('_');
-                if (parts.length < 3) return true;
-                
-                const expectedPct = parseInt(parts[2]) / 100;
-                const gap = expectedPct - actualPct;
-                
-                return gap >= threshold;
-            });
+        // Update status text
+        const statusSpan = document.getElementById('filter-status');
+        if (enableFilter) {
+             statusSpan.textContent = `筛选状态: 已启用，只显示超出目标 ${threshold * 100}% 以上的提醒`;
+        } else {
+             statusSpan.textContent = '筛选状态: 已禁用 (显示所有)';
         }
+        
+        if (!enableFilter) {
+            return alerts;
+        }
+        
+        return alerts.filter(alert => {
+            const ruleId = alert.rule_id || '';
+            // For non-checkpoint alerts, keep them
+            if (!ruleId.startsWith('checkpoint_')) return true; 
+            
+            const parts = ruleId.split('_');
+            if (parts.length < 3) return true;
+            
+            const actualPct = parseFloat(alert.volume_ratio);
+            const expectedPct = parseInt(parts[2]) / 100;
+            const excess = actualPct - expectedPct;
+            
+            return excess >= threshold;
+        });
+    }
         
         // 加载提醒数据
         async function loadAlerts() {
