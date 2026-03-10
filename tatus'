@@ -1,0 +1,29 @@
+[33mcommit 8772246194dd4fbed3de2ba6061e2ed8915a33be[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m)[m
+Author: Sami <sami@example.com>
+Date:   Tue Mar 10 10:06:15 2026 +0800
+
+    Add_frontend_price_filter_logic
+
+[33mcommit 5e3d31b51a759fdc05dec0a3774d3fa625343c8b[m
+Author: Sami <sami@example.com>
+Date:   Mon Mar 9 12:10:18 2026 +0800
+
+    Refactor_volume_alerts_to_time_checkpoints
+
+[33mcommit fd30ad182969a620fb8e536505a64924adeb8e88[m
+Author: Sami <sami@example.com>
+Date:   Mon Mar 9 10:31:11 2026 +0800
+
+    Refactor_volume_alerts_model
+
+[33mcommit a7649ec72628cc7ce806b098afc20a03480b5499[m
+Author: Sami <sami@example.com>
+Date:   Mon Mar 9 10:12:47 2026 +0800
+
+    update
+
+[33mcommit 2b57fc435a2aa64635cc53faa12412698a081a64[m
+Author: Sami <sami@example.com>
+Date:   Tue Mar 3 10:23:04 2026 +0800
+
+    feat_dynamic_settings_and_ui_optimization

@@ -351,6 +351,10 @@
                         return; // Don't render in generic list
                     }
                     
+                    if (s.key === 'price_filter_minutes' || s.key === 'price_filter_threshold') {
+                        return; // Hide these from UI
+                    }
+                    
                     const div = document.createElement('div');
                     div.className = 'config-item';
                     div.style.cssText = 'display: flex; flex-direction: column; margin-right: 20px; margin-bottom: 10px;';
@@ -376,7 +380,7 @@
                         input.style.color = 'white';
                         input.style.borderRadius = '3px';
                         
-                        if (s.value_type === 'float') input.step = '0.1';
+                        if (s.value_type === 'float') input.step = '0.01';
                         if (s.min_value !== null) input.min = s.min_value;
                         if (s.max_value !== null) input.max = s.max_value;
                     }
