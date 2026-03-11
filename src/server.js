@@ -1,4 +1,5 @@
 const express = require('express');
+const fs = require('fs');
 // const compression = require('compression'); // Temporarily disabled for debugging
 const path = require('path');
 const { Pool } = require('pg');
@@ -32,6 +33,21 @@ const pool = new Pool({
 
 // Initialize ConfigManager
 const config = new ConfigManager(pool);
+
+// Load ETF exclusion list
+let etfList = [];
+try {
+  const etfPath = path.join(__dirname, '../ETF.csv');
+  if (fs.existsSync(etfPath)) {
+    const etfContent = fs.readFileSync(etfPath, 'utf-8');
+    etfList = etfContent.split(/\r?\n/).map(line => line.trim()).filter(line => line);
+    console.log(`Loaded ${etfList.length} ETFs from ETF.csv`);
+  } else {
+    console.warn('ETF.csv not found, skipping ETF exclusion');
+  }
+} catch (err) {
+  console.error('Failed to load ETF.csv:', err.message);
+}
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
@@ -296,6 +312,51 @@ app.get('/api/alerts', async (req, res) => {
   } catch (e) {
     console.error('alerts query failed:', e);
     res.status(500).json({ error: 'alerts query failed' });
+  }
+});
+
+// 排行榜 API
+app.get('/api/ranking', async (req, res) => {
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    
+    // 如果没有 ETF 列表，传递空数组，避免 SQL 语法错误
+    const safeEtfList = etfList.length > 0 ? etfList : ['__NO_ETF__'];
+
+    const sql = `
+      WITH avg_vol AS (
+        SELECT symbol, AVG(total_volume) AS avg_vol
+        FROM market_data.daily_summary
+        WHERE trade_date >= current_date - 10
+          AND trade_date < current_date
+        GROUP BY symbol
+        HAVING AVG(total_volume) >= 1000
+      ),
+      today AS (
+        SELECT symbol, open_price, close_price, total_volume
+        FROM market_data.daily_summary
+        WHERE trade_date = current_date
+      )
+      SELECT 
+        t.symbol,
+        t.open_price,
+        t.close_price AS last_price,
+        (t.close_price - t.open_price) AS change_amount,
+        ROUND((t.close_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
+        t.total_volume,
+        ROUND(a.avg_vol) AS avg_vol_10d
+      FROM today t
+      JOIN avg_vol a USING (symbol)
+      WHERE NOT (t.symbol = ANY($1::text[]))
+        AND t.open_price > 0
+      ORDER BY (t.close_price - t.open_price) DESC;
+    `;
+
+    const { rows } = await pool.query(sql, [safeEtfList]);
+    res.json(rows);
+  } catch (e) {
+    console.error('ranking query failed:', e);
+    res.status(500).json({ error: 'ranking query failed' });
   }
 });
 
@@ -649,9 +710,45 @@ async function ensureVolumeAlertSchema() {
   volumeSchemaReady = true;
 }
 
+// Update daily_summary table with today's data
+async function updateDailySummary() {
+  try {
+    const start = Date.now();
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    const sql = `
+      INSERT INTO market_data.daily_summary (symbol, trade_date, open_price, close_price, high_price, low_price, total_volume)
+      SELECT 
+        symbol,
+        (received_at AT TIME ZONE 'Asia/Shanghai')::date,
+        (array_agg(price::numeric ORDER BY received_at ASC))[1],
+        (array_agg(price::numeric ORDER BY received_at DESC))[1],
+        MAX(price::numeric),
+        MIN(price::numeric),
+        SUM(size::numeric)
+      FROM tos_trades
+      WHERE received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
+        AND price IS NOT NULL AND price::numeric > 0
+      GROUP BY symbol, (received_at AT TIME ZONE 'Asia/Shanghai')::date
+      ON CONFLICT (symbol, trade_date) DO UPDATE SET
+        close_price = EXCLUDED.close_price,
+        high_price = EXCLUDED.high_price,
+        low_price = EXCLUDED.low_price,
+        total_volume = EXCLUDED.total_volume;
+    `;
+    await pool.query(sql);
+    const duration = Date.now() - start;
+    console.log(`[DailySummary] Updated in ${duration}ms`);
+  } catch (err) {
+    console.error('[DailySummary] Update failed:', err.message);
+  }
+}
+
 async function scanAllVolumeAlerts() {
   await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
   await ensureVolumeAlertSchema();
+
+  // Update daily summary before scan
+  await updateDailySummary();
 
   // Load dynamic configuration
   const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
@@ -836,6 +933,11 @@ app.get('/hills', (req, res) => {
 // 山丘放量提醒列表页面路由
 app.get('/hill-alerts', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/hill-alerts.html'));
+});
+
+// 排行榜页面路由
+app.get('/ranking', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/ranking.html'));
 });
 
 // 在静态服务与监听之前启动监控（或?listen 之后皆可?

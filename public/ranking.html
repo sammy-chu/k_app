@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>股票涨跌幅排名</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #ddd;
+            padding: 20px;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .nav-links {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .nav-links a {
+            color: #007acc;
+            text-decoration: none;
+            padding: 8px 16px;
+            margin: 0 10px;
+            border: 1px solid #007acc;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+
+        .nav-links a:hover {
+            background-color: #007acc;
+            color: white;
+        }
+
+        .header-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #333;
+            padding-bottom: 15px;
+        }
+
+        .title {
+            font-size: 1.5em;
+            color: #ddd;
+            font-weight: normal;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+
+        .sort-btn {
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+            color: #ddd;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .sort-btn:hover {
+            background-color: #333;
+        }
+
+        .sort-btn.active {
+            background-color: #007acc;
+            border-color: #007acc;
+            color: white;
+        }
+
+        .refresh-info {
+            font-size: 12px;
+            color: #888;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: #252525;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        th, td {
+            padding: 12px 15px;
+            text-align: right;
+            border-bottom: 1px solid #333;
+        }
+
+        th {
+            background-color: #333;
+            color: #ccc;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+        
+        th:first-child, td:first-child {
+            text-align: center;
+        }
+
+        th:nth-child(2), td:nth-child(2) {
+            text-align: left;
+        }
+
+        tr:hover {
+            background-color: #2a2a2a;
+        }
+
+        .up { color: #26a69a; }
+        .down { color: #ef5350; }
+        .flat { color: #888; }
+        
+        .symbol {
+            font-weight: bold;
+            color: #fff;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+
+        .error {
+            text-align: center;
+            padding: 40px;
+            color: #ff6b6b;
+        }
+
+        @media (max-width: 768px) {
+            table {
+                font-size: 12px;
+            }
+            th, td {
+                padding: 8px 5px;
+            }
+            .hide-mobile {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-links">
+            <a href="/alerts">价格提醒</a>
+            <a href="/volume-alerts">放量提醒</a>
+            <a href="/hills">山丘形态</a>
+            <a href="/hill-alerts">山丘放量</a>
+            <a href="/ranking">涨跌排名</a>
+        </div>
+
+        <div class="header-bar">
+            <h1 class="title">今日涨跌排名 (TOP 50)</h1>
+            <div class="controls">
+                <span class="refresh-info" id="refresh-timer">30s</span>
+                <button class="sort-btn active" id="btn-sort-amount" onclick="setSortMode('amount')">按涨跌额</button>
+                <button class="sort-btn" id="btn-sort-pct" onclick="setSortMode('pct')">按涨跌幅</button>
+            </div>
+        </div>
+
+        <div id="content">
+            <div class="loading">正在加载数据...</div>
+        </div>
+    </div>
+
+    <script>
+        let currentData = [];
+        let sortMode = 'amount'; // 'amount' or 'pct'
+        let timer = null;
+        let countdown = 30;
+
+        function setSortMode(mode) {
+            sortMode = mode;
+            document.getElementById('btn-sort-amount').className = mode === 'amount' ? 'sort-btn active' : 'sort-btn';
+            document.getElementById('btn-sort-pct').className = mode === 'pct' ? 'sort-btn active' : 'sort-btn';
+            renderTable();
+        }
+
+        async function fetchData() {
+            try {
+                const res = await fetch('/api/ranking');
+                if (!res.ok) throw new Error('Network response was not ok');
+                currentData = await res.json();
+                renderTable();
+                resetTimer();
+            } catch (err) {
+                document.getElementById('content').innerHTML = `<div class="error">加载失败: ${err.message}</div>`;
+            }
+        }
+
+        function formatNumber(num, decimals = 2) {
+            if (num === null || num === undefined) return '-';
+            return Number(num).toFixed(decimals);
+        }
+
+        function formatVolume(num) {
+            if (num === null || num === undefined) return '-';
+            if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num;
+        }
+
+        function renderTable() {
+            if (!currentData || currentData.length === 0) {
+                document.getElementById('content').innerHTML = '<div class="loading">暂无数据</div>';
+                return;
+            }
+
+            // Sort data
+            const sorted = [...currentData].sort((a, b) => {
+                if (sortMode === 'amount') {
+                    return Math.abs(b.change_amount) - Math.abs(a.change_amount); // 按绝对值排？通常是涨幅榜排前面
+                    // 用户说"按涨跌额排序"，通常意味着绝对值大的或者涨幅大的。
+                    // 用户SQL里是 ORDER BY (t.close_price - t.open_price) DESC; 默认是涨幅额从大到小
+                    // 这里我们在前端也支持一下。
+                    // 让我们保持简单的从大到小排序，或者绝对值。通常看榜单是看涨幅榜。
+                    // 既然后端已经排好序了(涨跌额 DESC)，我们默认用后端的顺序。
+                    // 如果用户切换到幅度，我们按幅度排序。
+                }
+                // 后端默认是 amount desc
+                if (sortMode === 'amount') {
+                    return Number(b.change_amount) - Number(a.change_amount);
+                } else {
+                    return Number(b.change_pct) - Number(a.change_pct);
+                }
+            });
+
+            let html = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>排名</th>
+                            <th>代码</th>
+                            <th>最新价</th>
+                            <th>开盘价</th>
+                            <th>涨跌额</th>
+                            <th>涨跌幅%</th>
+                            <th>成交量</th>
+                            <th class="hide-mobile">10日均量</th>
+                            <th class="hide-mobile">量比</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            sorted.forEach((item, index) => {
+                const changeClass = Number(item.change_amount) > 0 ? 'up' : (Number(item.change_amount) < 0 ? 'down' : 'flat');
+                const volumeRatio = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-';
+                
+                html += `
+                    <tr>
+                        <td>${index + 1}</td>
+                        <td class="symbol">${item.symbol}</td>
+                        <td class="${changeClass}">${formatNumber(item.last_price)}</td>
+                        <td>${formatNumber(item.open_price)}</td>
+                        <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
+                        <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
+                        <td>${formatVolume(item.total_volume)}</td>
+                        <td class="hide-mobile">${formatVolume(item.avg_vol_10d)}</td>
+                        <td class="hide-mobile">${volumeRatio}x</td>
+                    </tr>
+                `;
+            });
+
+            html += `</tbody></table>`;
+            document.getElementById('content').innerHTML = html;
+        }
+
+        function resetTimer() {
+            countdown = 30;
+            updateTimerDisplay();
+        }
+
+        function updateTimerDisplay() {
+            document.getElementById('refresh-timer').textContent = `${countdown}s 后刷新`;
+        }
+
+        // Initialize
+        fetchData();
+
+        // Timer loop
+        setInterval(() => {
+            countdown--;
+            if (countdown <= 0) {
+                fetchData();
+            } else {
+                updateTimerDisplay();
+            }
+        }, 1000);
+
+    </script>
+</body>
+</html>
