@@ -166,6 +166,12 @@
             flex: 1;
         }
 
+        .alert-price-diff {
+            min-width: 100px;
+            font-size: 13px;
+            color: #aaa;
+        }
+
         .loading {
             text-align: center;
             padding: 40px;
@@ -272,11 +278,20 @@
                     <input type="number" id="threshold" min="0" step="0.01" placeholder="0.1" value="0.1">
                     <label for="enable-filter">
                         <input type="checkbox" id="enable-filter" checked>
-                        启用筛选
+                        启用量比筛选
+                    </label>
+                </div>
+                <div class="config-row" style="border-top: 1px solid #444; margin-top: 10px; padding-top: 10px;">
+                    <label for="price-threshold">5分价格变动：</label>
+                    <input type="number" id="price-threshold" min="0" step="0.1" placeholder="0.5" value="0.5" style="width: 80px;">
+                    <label for="enable-price-filter">
+                        <input type="checkbox" id="enable-price-filter">
+                        启用价格筛选
                     </label>
                 </div>
                 <div class="config-status">
-                    <span id="filter-status">筛选状态: 已启用，阈值 0.1</span>
+                    <span id="filter-status">筛选状态: ...</span><br>
+                    <span id="price-filter-status" style="color: #888; font-size: 0.9em;">价格筛选: 已禁用</span>
                 </div>
             </div>
         </div>
@@ -351,8 +366,9 @@
                         return; // Don't render in generic list
                     }
                     
+                    // Skip price filter settings as per user request to remove them from UI
                     if (s.key === 'price_filter_minutes' || s.key === 'price_filter_threshold') {
-                        return; // Hide these from UI
+                        return;
                     }
                     
                     const div = document.createElement('div');
@@ -576,9 +592,13 @@
                         [${label}] 已达日均量的 ${(actualPct*100).toFixed(1)}% (目标 ${(expectedPct*100).toFixed(0)}%) ✓
                         (当前量: ${Number(alert.current_cum_vol).toLocaleString()})
                     </span>
+                    <span class="alert-price-diff" data-symbol="${alert.symbol}">价格计算中...</span>
                 </li>
             `;
         }).join('');
+        
+        // Render 完成后，启动价格检查队列
+        setTimeout(processPriceQueue, 100);
     }
 
     // 应用筛选
@@ -619,6 +639,86 @@
         });
     }
         
+        // --- Price Filter Logic ---
+        const priceCache = {};
+        
+        async function fetchPriceDiff(symbol) {
+            const now = Date.now();
+            // Cache for 1 minute
+            if (priceCache[symbol] && (now - priceCache[symbol].ts < 60000)) {
+                return priceCache[symbol].diff;
+            }
+
+            try {
+                // Use new lightweight API
+                const res = await fetch(`/api/price-snapshot?symbol=${symbol}&minutes=5`);
+                const data = await res.json();
+                
+                if (!data || typeof data.change === 'undefined') return 0;
+                
+                // Return absolute difference for filtering logic
+                const diff = Math.abs(data.change);
+                priceCache[symbol] = { diff, ts: now };
+                return diff;
+            } catch (e) {
+                console.error(`Error fetching price for ${symbol}:`, e);
+                return 0;
+            }
+        }
+
+        async function processPriceQueue() {
+            const rows = document.querySelectorAll('.alert-item');
+            const uniqueSymbols = new Set();
+            rows.forEach(row => {
+                const sym = row.querySelector('.alert-symbol').textContent;
+                uniqueSymbols.add(sym);
+            });
+            
+            const queue = Array.from(uniqueSymbols);
+            console.log(`Starting price check for ${queue.length} symbols...`);
+
+            // Process in batches of 3
+            for (let i = 0; i < queue.length; i += 3) {
+                const batch = queue.slice(i, i + 3);
+                await Promise.all(batch.map(async (sym) => {
+                    const diff = await fetchPriceDiff(sym);
+                    updateRowPrice(sym, diff);
+                }));
+            }
+        }
+
+        function updateRowPrice(symbol, diff) {
+            const rows = document.querySelectorAll('.alert-item');
+            const threshold = parseFloat(document.getElementById('price-threshold').value) || 0.5;
+            const enabled = document.getElementById('enable-price-filter').checked;
+
+            rows.forEach(row => {
+                const symSpan = row.querySelector('.alert-symbol');
+                if (symSpan && symSpan.textContent === symbol) {
+                    const diffSpan = row.querySelector('.alert-price-diff');
+                    if (diffSpan) {
+                        diffSpan.textContent = `5分变动: ${diff.toFixed(2)}`;
+                        if (diff >= 0.5) {
+                            diffSpan.style.color = '#ff9800'; // Highlight significant change
+                            diffSpan.style.fontWeight = 'bold';
+                        } else {
+                            diffSpan.style.color = '#666';
+                        }
+                    }
+                    
+                    // Apply visibility logic
+                    if (enabled && diff < threshold) {
+                        row.style.display = 'none';
+                    } else {
+                        // Restore display if it wasn't hidden by other filters
+                        // Actually, renderAlerts only renders what passed the volume filter.
+                        // So we are safe to show it.
+                        row.style.display = 'flex';
+                    }
+                }
+            });
+        }
+
         // 加载提醒数据
         async function loadAlerts() {
             try {
@@ -657,6 +757,11 @@
             const thresholdInput = document.getElementById('threshold');
             const enableFilterCheckbox = document.getElementById('enable-filter');
             const filterStatusSpan = document.getElementById('filter-status');
+            
+            const priceThresholdInput = document.getElementById('price-threshold');
+            const enablePriceCheckbox = document.getElementById('enable-price-filter');
+            const priceStatusSpan = document.getElementById('price-filter-status');
+
             const toggleBtn = document.getElementById('toggle-config');
             const configContent = document.getElementById('config-content');
 
@@ -665,8 +770,11 @@
             if (savedConfig) {
                 try {
                     const config = JSON.parse(savedConfig);
-                    thresholdInput.value = config.threshold || 0.5;
+                    thresholdInput.value = config.threshold || 0.1;
                     enableFilterCheckbox.checked = config.enabled !== false;
+                    
+                    if (config.priceThreshold !== undefined) priceThresholdInput.value = config.priceThreshold;
+                    if (config.priceEnabled !== undefined) enablePriceCheckbox.checked = config.priceEnabled;
                 } catch(e) {}
             }
 
@@ -681,27 +789,58 @@
                 }
             });
 
+            // Volume Filter Listeners
             thresholdInput.addEventListener('input', updateConfig);
             enableFilterCheckbox.addEventListener('change', updateConfig);
+            
+            // Price Filter Listeners
+            priceThresholdInput.addEventListener('input', updateConfig);
+            enablePriceCheckbox.addEventListener('change', updateConfig);
 
             function updateConfig() {
+                // Volume Filter
                 const threshold = parseFloat(thresholdInput.value) || 0;
                 const enabled = enableFilterCheckbox.checked;
 
-                localStorage.setItem('volumeFilterConfig', JSON.stringify({ threshold, enabled }));
+                // Price Filter
+                const priceThreshold = parseFloat(priceThresholdInput.value) || 0;
+                const priceEnabled = enablePriceCheckbox.checked;
+
+                localStorage.setItem('volumeFilterConfig', JSON.stringify({ 
+                    threshold, enabled, 
+                    priceThreshold, priceEnabled 
+                }));
                 
+                // Update Status Text
                 if (enabled) {
-                    filterStatusSpan.textContent = `筛选状态: 已启用，阈值 ${threshold}`;
+                    filterStatusSpan.textContent = `量比筛选: 已启用 (超出 ${threshold * 100}%)`;
                 } else {
-                    filterStatusSpan.textContent = '筛选状态: 已禁用';
+                    filterStatusSpan.textContent = '量比筛选: 已禁用';
                 }
 
+                if (priceEnabled) {
+                    priceStatusSpan.textContent = `价格筛选: 已启用 (变动 >= ${priceThreshold})`;
+                    priceStatusSpan.style.color = '#4caf50';
+                } else {
+                    priceStatusSpan.textContent = '价格筛选: 已禁用';
+                    priceStatusSpan.style.color = '#888';
+                }
+
+                // Re-render (for volume filter)
                 reRenderAlerts();
+                
+                // Apply price filter (for visuals)
+                // Note: reRenderAlerts calls renderAlerts which calls processPriceQueue which calls updateRowPrice
+                // But updateRowPrice reads the DOM values directly, so it will pick up new settings.
+                // However, reRenderAlerts reconstructs the DOM, so existing price diffs (text) might be lost if we don't cache carefully?
+                // We have priceCache, so processPriceQueue will be fast (from cache).
+                // So reRenderAlerts is fine.
             }
 
             // Initial status update
             updateConfig();
-
+            
+            // ... rest of init
             // Settings UI Init
             loadSettings();
             document.getElementById('save-settings-btn').addEventListener('click', saveSettings);

@@ -26,7 +26,8 @@ const pool = new Pool({
   password: process.env.PGPASSWORD || 'postgres',
   max: 20, // Increase pool size to handle concurrent background tasks + API requests
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000, // Fail fast if no connection available
+  connectionTimeoutMillis: 10000, // Fail fast if no connection available
+  statement_timeout: 30000,
 });
 
 // Initialize ConfigManager
@@ -34,6 +35,54 @@ const config = new ConfigManager(pool);
 
 app.get('/health', (req, res) => {
   res.json({ ok: true, ts: new Date().toISOString() });
+});
+
+// 轻量级价格快照 API
+app.get('/api/price-snapshot', async (req, res) => {
+  try {
+    const symbol = String(req.query.symbol || '').trim();
+    const minutes = Number(req.query.minutes || 5);
+    
+    if (!symbol) return res.status(400).json({ error: 'symbol required' });
+
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
+    // 1. 获取最新价格
+    // 使用 received_at 替代 trade_time，因为 trade_time 是文本格式且不包含日期，无法准确排序/比较
+    const currentRes = await pool.query(`
+      SELECT price::numeric 
+      FROM tos_trades 
+      WHERE symbol = $1 
+      ORDER BY received_at DESC 
+      LIMIT 1
+    `, [symbol]);
+
+    // 2. 获取 N 分钟前的价格
+    const prevRes = await pool.query(`
+      SELECT price::numeric 
+      FROM tos_trades 
+      WHERE symbol = $1 
+        AND received_at <= (now() AT TIME ZONE 'Asia/Shanghai' - ($2 || ' minutes')::interval)
+      ORDER BY received_at DESC 
+      LIMIT 1
+    `, [symbol, minutes]);
+
+    const current = currentRes.rows.length > 0 ? Number(currentRes.rows[0].price) : 0;
+    const previous = prevRes.rows.length > 0 ? Number(prevRes.rows[0].price) : 0;
+    
+    // 如果没有历史数据，change 为 0
+    const change = (current && previous) ? Number((current - previous).toFixed(2)) : 0;
+
+    return res.json({
+      current,
+      previous,
+      change
+    });
+
+  } catch (e) {
+    console.error('price-snapshot error:', e);
+    return res.status(500).json({ error: 'internal_error' });
+  }
 });
 
 // OHLCV API 路由
@@ -525,15 +574,9 @@ async function scanAndInsertAlerts() {
         FROM tos_trades t
         WHERE t.price IS NOT NULL AND t.price::numeric > 0
           AND COALESCE(t.size::numeric, 0) > 0
-          /* 使用 received_at 作为数据接收时间进行筛选 */
-          AND date_trunc('minute', (t.received_at AT TIME ZONE 'Asia/Shanghai')) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params))
-          /* 使用 trade_time 作为实际交易时间进行验证 - 确保交易时间在合理范围内 */
-          AND date_trunc('minute', 
-            CASE 
-              WHEN t.trade_time ~ '^\\d{4}-\\d{2}-\\d{2}' THEN t.trade_time::timestamp
-              ELSE ((SELECT target_date FROM params) || ' ' || t.trade_time)::timestamp
-            END
-          ) IN ((SELECT cur_bucket_local FROM params), (SELECT prev_bucket_local FROM params))
+          /* 使用 received_at 作为数据接收时间进行筛选 - 使用范围查询优化索引 */
+          AND t.received_at >= ((SELECT prev_bucket_local FROM params) AT TIME ZONE 'Asia/Shanghai')
+          AND t.received_at < ((SELECT cur_bucket_local FROM params) AT TIME ZONE 'Asia/Shanghai' + INTERVAL '1 minute')
       ),
       agg AS (
         SELECT symbol, bucket_local AS bucket,
@@ -765,7 +808,7 @@ function startAlertMonitor() {
   // 1. 价格波动监控 (原有的)
   // scanAndInsertAlerts();
   // setInterval(scanAndInsertAlerts, 5000);
-  runScan('PriceMonitor', scanAndInsertAlerts, 5000);
+  runScan('PriceMonitor', scanAndInsertAlerts, 30000);
 
   // 2. 日级成交量偏离监控 (批量扫描所有 symbol)
   runScan('VolumeMonitor', scanAllVolumeAlerts, VOLUME_SCAN_INTERVAL);
@@ -796,9 +839,9 @@ app.get('/hill-alerts', (req, res) => {
 });
 
 // 在静态服务与监听之前启动监控（或?listen 之后皆可?
-startAlertMonitor();
-console.log(`[ALERT monitor] starting, interval=5000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
-console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, default_history=${VOLUME_HISTORY_DAYS}d`);
+  startAlertMonitor();
+  console.log(`[ALERT monitor] starting, interval=30000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
+  console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, default_history=${VOLUME_HISTORY_DAYS}d`);
 
 const PORT = process.env.PORT || 8889;
 const HOST = process.env.HOST || '0.0.0.0';
