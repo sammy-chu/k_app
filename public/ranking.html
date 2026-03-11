@@ -171,11 +171,13 @@
         </div>
 
         <div class="header-bar">
-            <h1 class="title">今日涨跌排名 (TOP 50)</h1>
+            <h1 class="title">今日涨跌排名</h1>
             <div class="controls">
                 <span class="refresh-info" id="refresh-timer">30s</span>
                 <button class="sort-btn active" id="btn-sort-amount" onclick="setSortMode('amount')">按涨跌额</button>
                 <button class="sort-btn" id="btn-sort-pct" onclick="setSortMode('pct')">按涨跌幅</button>
+                <button class="sort-btn" id="btn-sort-vol" onclick="setSortMode('vol')">按成交量</button>
+                <button class="sort-btn" id="btn-sort-avg-vol" onclick="setSortMode('avg_vol')">按10日均量</button>
             </div>
         </div>
 
@@ -186,7 +188,7 @@
 
     <script>
         let currentData = [];
-        let sortMode = 'amount'; // 'amount' or 'pct'
+        let sortMode = 'amount'; // 'amount', 'pct', 'vol', 'avg_vol'
         let timer = null;
         let countdown = 30;
 
@@ -194,6 +196,8 @@
             sortMode = mode;
             document.getElementById('btn-sort-amount').className = mode === 'amount' ? 'sort-btn active' : 'sort-btn';
             document.getElementById('btn-sort-pct').className = mode === 'pct' ? 'sort-btn active' : 'sort-btn';
+            document.getElementById('btn-sort-vol').className = mode === 'vol' ? 'sort-btn active' : 'sort-btn';
+            document.getElementById('btn-sort-avg-vol').className = mode === 'avg_vol' ? 'sort-btn active' : 'sort-btn';
             renderTable();
         }
 
@@ -241,9 +245,14 @@
                 // 后端默认是 amount desc
                 if (sortMode === 'amount') {
                     return Number(b.change_amount) - Number(a.change_amount);
-                } else {
+                } else if (sortMode === 'pct') {
                     return Number(b.change_pct) - Number(a.change_pct);
+                } else if (sortMode === 'vol') {
+                    return Number(b.total_volume) - Number(a.total_volume);
+                } else if (sortMode === 'avg_vol') {
+                    return Number(b.avg_vol_10d) - Number(a.avg_vol_10d);
                 }
+                return 0;
             });
 
             let html = `
