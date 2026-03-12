@@ -731,13 +731,13 @@ async function updateDailySummary() {
       GROUP BY symbol, (received_at AT TIME ZONE 'Asia/Shanghai')::date
       ON CONFLICT (symbol, trade_date) DO UPDATE SET
         close_price = EXCLUDED.close_price,
-        high_price = EXCLUDED.high_price,
-        low_price = EXCLUDED.low_price,
+        high_price = GREATEST(daily_summary.high_price, EXCLUDED.high_price),
+        low_price = LEAST(daily_summary.low_price, EXCLUDED.low_price),
         total_volume = EXCLUDED.total_volume;
     `;
     await pool.query(sql);
     const duration = Date.now() - start;
-    console.log(`[DailySummary] Updated in ${duration}ms`);
+    // console.log(`[DailySummary] Updated in ${duration}ms`);
   } catch (err) {
     console.error('[DailySummary] Update failed:', err.message);
   }
@@ -746,9 +746,6 @@ async function updateDailySummary() {
 async function scanAllVolumeAlerts() {
   await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
   await ensureVolumeAlertSchema();
-
-  // Update daily summary before scan
-  await updateDailySummary();
 
   // Load dynamic configuration
   const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
@@ -909,9 +906,16 @@ function startAlertMonitor() {
 
   // 2. 日级成交量偏离监控 (批量扫描所有 symbol)
   runScan('VolumeMonitor', scanAllVolumeAlerts, VOLUME_SCAN_INTERVAL);
+
+  console.log(`[ALERT monitor] starting, interval=30000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
+  console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, default_history=${VOLUME_HISTORY_DAYS}d`);
+  
+  // 3. 独立运行的每日数据汇总 (DailySummaryUpdater)
+  console.log(`[DailySummaryUpdater] starting, interval=1s`);
+  runScan('DailySummaryUpdater', updateDailySummary, 1000);
 }
 
-// 静态文件服�?
+// 静态文件服务
 app.use(express.static(path.join(__dirname, '../public')));
 
 // 提醒页面路由
@@ -941,9 +945,7 @@ app.get('/ranking', (req, res) => {
 });
 
 // 在静态服务与监听之前启动监控（或?listen 之后皆可?
-  startAlertMonitor();
-  console.log(`[ALERT monitor] starting, interval=30000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
-  console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, default_history=${VOLUME_HISTORY_DAYS}d`);
+startAlertMonitor();
 
 const PORT = process.env.PORT || 8889;
 const HOST = process.env.HOST || '0.0.0.0';

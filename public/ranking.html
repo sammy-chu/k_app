@@ -147,6 +147,20 @@
             color: #ff6b6b;
         }
 
+        .sort-icon {
+            font-size: 10px;
+            margin-left: 5px;
+            color: #666;
+        }
+
+        th.active {
+            color: #007acc;
+        }
+        
+        th.active .sort-icon {
+            color: #007acc;
+        }
+
         @media (max-width: 768px) {
             table {
                 font-size: 12px;
@@ -173,11 +187,7 @@
         <div class="header-bar">
             <h1 class="title">今日涨跌排名</h1>
             <div class="controls">
-                <span class="refresh-info" id="refresh-timer">30s</span>
-                <button class="sort-btn active" id="btn-sort-amount" onclick="setSortMode('amount')">按涨跌额</button>
-                <button class="sort-btn" id="btn-sort-pct" onclick="setSortMode('pct')">按涨跌幅</button>
-                <button class="sort-btn" id="btn-sort-vol" onclick="setSortMode('vol')">按成交量</button>
-                <button class="sort-btn" id="btn-sort-avg-vol" onclick="setSortMode('avg_vol')">按10日均量</button>
+                <span class="refresh-info" id="refresh-timer">1s</span>
             </div>
         </div>
 
@@ -188,16 +198,19 @@
 
     <script>
         let currentData = [];
-        let sortMode = 'amount'; // 'amount', 'pct', 'vol', 'avg_vol'
+        let sortColumn = 'change_amount'; // default sort column
+        let sortDirection = 'desc'; // 'asc' or 'desc'
         let timer = null;
-        let countdown = 30;
+        let countdown = 1;
 
-        function setSortMode(mode) {
-            sortMode = mode;
-            document.getElementById('btn-sort-amount').className = mode === 'amount' ? 'sort-btn active' : 'sort-btn';
-            document.getElementById('btn-sort-pct').className = mode === 'pct' ? 'sort-btn active' : 'sort-btn';
-            document.getElementById('btn-sort-vol').className = mode === 'vol' ? 'sort-btn active' : 'sort-btn';
-            document.getElementById('btn-sort-avg-vol').className = mode === 'avg_vol' ? 'sort-btn active' : 'sort-btn';
+        function handleSort(column) {
+            if (sortColumn === column) {
+                // Toggle direction
+                sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+            } else {
+                sortColumn = column;
+                sortDirection = 'desc'; // Default to desc for new column
+            }
             renderTable();
         }
 
@@ -233,40 +246,43 @@
 
             // Sort data
             const sorted = [...currentData].sort((a, b) => {
-                if (sortMode === 'amount') {
-                    return Math.abs(b.change_amount) - Math.abs(a.change_amount); // 按绝对值排？通常是涨幅榜排前面
-                    // 用户说"按涨跌额排序"，通常意味着绝对值大的或者涨幅大的。
-                    // 用户SQL里是 ORDER BY (t.close_price - t.open_price) DESC; 默认是涨幅额从大到小
-                    // 这里我们在前端也支持一下。
-                    // 让我们保持简单的从大到小排序，或者绝对值。通常看榜单是看涨幅榜。
-                    // 既然后端已经排好序了(涨跌额 DESC)，我们默认用后端的顺序。
-                    // 如果用户切换到幅度，我们按幅度排序。
+                let valA = a[sortColumn];
+                let valB = b[sortColumn];
+
+                // Handle numeric conversion
+                if (sortColumn !== 'symbol') {
+                    valA = Number(valA);
+                    valB = Number(valB);
                 }
-                // 后端默认是 amount desc
-                if (sortMode === 'amount') {
-                    return Number(b.change_amount) - Number(a.change_amount);
-                } else if (sortMode === 'pct') {
-                    return Number(b.change_pct) - Number(a.change_pct);
-                } else if (sortMode === 'vol') {
-                    return Number(b.total_volume) - Number(a.total_volume);
-                } else if (sortMode === 'avg_vol') {
-                    return Number(b.avg_vol_10d) - Number(a.avg_vol_10d);
+
+                if (sortDirection === 'asc') {
+                    return valA > valB ? 1 : -1;
+                } else {
+                    return valA < valB ? 1 : -1;
                 }
-                return 0;
             });
+
+            const getSortIcon = (col) => {
+                if (sortColumn !== col) return '↕';
+                return sortDirection === 'asc' ? '↑' : '↓';
+            };
+
+            const getHeaderClass = (col) => {
+                return sortColumn === col ? 'active' : '';
+            };
 
             let html = `
                 <table>
                     <thead>
                         <tr>
                             <th>排名</th>
-                            <th>代码</th>
-                            <th>最新价</th>
-                            <th>开盘价</th>
-                            <th>涨跌额</th>
-                            <th>涨跌幅%</th>
-                            <th>成交量</th>
-                            <th class="hide-mobile">10日均量</th>
+                            <th onclick="handleSort('symbol')" class="${getHeaderClass('symbol')}">代码 <span class="sort-icon">${getSortIcon('symbol')}</span></th>
+                            <th onclick="handleSort('last_price')" class="${getHeaderClass('last_price')}">最新价 <span class="sort-icon">${getSortIcon('last_price')}</span></th>
+                            <th onclick="handleSort('open_price')" class="${getHeaderClass('open_price')}">开盘价 <span class="sort-icon">${getSortIcon('open_price')}</span></th>
+                            <th onclick="handleSort('change_amount')" class="${getHeaderClass('change_amount')}">涨跌额 <span class="sort-icon">${getSortIcon('change_amount')}</span></th>
+                            <th onclick="handleSort('change_pct')" class="${getHeaderClass('change_pct')}">涨跌幅% <span class="sort-icon">${getSortIcon('change_pct')}</span></th>
+                            <th onclick="handleSort('total_volume')" class="${getHeaderClass('total_volume')}">成交量 <span class="sort-icon">${getSortIcon('total_volume')}</span></th>
+                            <th class="hide-mobile ${getHeaderClass('avg_vol_10d')}" onclick="handleSort('avg_vol_10d')">10日均量 <span class="sort-icon">${getSortIcon('avg_vol_10d')}</span></th>
                             <th class="hide-mobile">量比</th>
                         </tr>
                     </thead>
@@ -297,7 +313,7 @@
         }
 
         function resetTimer() {
-            countdown = 30;
+            countdown = 1;
             updateTimerDisplay();
         }
 
