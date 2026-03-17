@@ -161,15 +161,46 @@
             color: #007acc;
         }
 
+        .filters {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            background-color: #2a2a2a;
+            padding: 10px;
+            border-radius: 4px;
+            margin-right: 15px;
+        }
+        
+        .filter-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-input {
+            background-color: #1a1a1a;
+            border: 1px solid #444;
+            color: #ddd;
+            padding: 4px 8px;
+            border-radius: 4px;
+            width: 80px;
+        }
+
         @media (max-width: 768px) {
-            table {
-                font-size: 12px;
+            .header-bar {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
             }
-            th, td {
-                padding: 8px 5px;
+            
+            .controls {
+                width: 100%;
+                flex-wrap: wrap;
             }
-            .hide-mobile {
-                display: none;
+            
+            .filters {
+                flex-wrap: wrap;
+                margin-right: 0;
             }
         }
     </style>
@@ -187,6 +218,16 @@
         <div class="header-bar">
             <h1 class="title">今日涨跌排名</h1>
             <div class="controls">
+                <div class="filters">
+                    <div class="filter-item">
+                        <label>最小成交量:</label>
+                        <input type="number" id="min-volume" class="filter-input" value="0" onchange="fetchData()">
+                    </div>
+                    <div class="filter-item">
+                        <label>3分钟波动:</label>
+                        <input type="number" id="min-3m-change" class="filter-input" value="0" step="0.01" onchange="fetchData()">
+                    </div>
+                </div>
                 <span class="refresh-info" id="refresh-timer">1s</span>
             </div>
         </div>
@@ -216,7 +257,10 @@
 
         async function fetchData() {
             try {
-                const res = await fetch('/api/ranking');
+                const minVol = document.getElementById('min-volume').value;
+                const min3mChange = document.getElementById('min-3m-change').value;
+                
+                const res = await fetch(`/api/ranking?min_volume=${minVol}&min_price_change_3m=${min3mChange}`);
                 if (!res.ok) throw new Error('Network response was not ok');
                 currentData = await res.json();
                 renderTable();
@@ -282,6 +326,7 @@
                             <th onclick="handleSort('change_amount')" class="${getHeaderClass('change_amount')}">涨跌额 <span class="sort-icon">${getSortIcon('change_amount')}</span></th>
                             <th onclick="handleSort('change_pct')" class="${getHeaderClass('change_pct')}">涨跌幅% <span class="sort-icon">${getSortIcon('change_pct')}</span></th>
                             <th onclick="handleSort('total_volume')" class="${getHeaderClass('total_volume')}">成交量 <span class="sort-icon">${getSortIcon('total_volume')}</span></th>
+                            <th onclick="handleSort('price_change_3m')" class="${getHeaderClass('price_change_3m')}">3分涨跌 <span class="sort-icon">${getSortIcon('price_change_3m')}</span></th>
                             <th class="hide-mobile ${getHeaderClass('avg_vol_10d')}" onclick="handleSort('avg_vol_10d')">10日均量 <span class="sort-icon">${getSortIcon('avg_vol_10d')}</span></th>
                             <th class="hide-mobile">量比</th>
                         </tr>
@@ -291,6 +336,7 @@
 
             sorted.forEach((item, index) => {
                 const changeClass = Number(item.change_amount) > 0 ? 'up' : (Number(item.change_amount) < 0 ? 'down' : 'flat');
+                const change3mClass = Number(item.price_change_3m) > 0 ? 'up' : (Number(item.price_change_3m) < 0 ? 'down' : 'flat');
                 const volumeRatio = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-';
                 
                 html += `
@@ -302,6 +348,7 @@
                         <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
                         <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
                         <td>${formatVolume(item.total_volume)}</td>
+                        <td class="${change3mClass}">${item.price_change_3m > 0 ? '+' : ''}${formatNumber(item.price_change_3m)}</td>
                         <td class="hide-mobile">${formatVolume(item.avg_vol_10d)}</td>
                         <td class="hide-mobile">${volumeRatio}x</td>
                     </tr>

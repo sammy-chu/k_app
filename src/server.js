@@ -20,7 +20,7 @@ app.use((req, res, next) => {
 
 // 数据库连接池配置
 const pool = new Pool({
-  host: process.env.PGHOST || '192.168.31.247',
+  host: process.env.PGHOST || 'localhost',
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'ppro8_market_data',
   user: process.env.PGUSER || 'postgres',
@@ -33,6 +33,107 @@ const pool = new Pool({
 
 // Initialize ConfigManager
 const config = new ConfigManager(pool);
+
+async function ensureTables() {
+  const client = await pool.connect();
+  try {
+    await client.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    
+    // k_alerts
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS k_alerts (
+        id SERIAL PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        bucket TIMESTAMPTZ NOT NULL,
+        open NUMERIC,
+        high NUMERIC,
+        low NUMERIC,
+        close NUMERIC,
+        amplitude_pct NUMERIC,
+        direction INTEGER,
+        rule_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_k_alerts_unique ON k_alerts (symbol, bucket, rule_id);
+    `);
+
+    // k_volume_alerts
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS k_volume_alerts (
+        id SERIAL PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        bucket TIMESTAMPTZ NOT NULL,
+        volume_ratio NUMERIC,
+        current_cum_vol NUMERIC,
+        avg_daily_vol NUMERIC,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        rule_id TEXT NOT NULL DEFAULT 'volume_surge',
+        updated_at TIMESTAMPTZ,
+        current_price NUMERIC,
+        prev_price NUMERIC,
+        price_change_val NUMERIC,
+        price_note TEXT
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_k_vol_alerts_unique ON k_volume_alerts (symbol, bucket, rule_id);
+    `);
+
+    // tos_daily_volume (if not exists)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS tos_daily_volume (
+        symbol TEXT NOT NULL,
+        trade_date DATE NOT NULL,
+        daily_volume NUMERIC,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (symbol, trade_date)
+      );
+    `);
+    
+    // daily_summary (if not exists)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS daily_summary (
+        symbol TEXT NOT NULL,
+        trade_date DATE NOT NULL,
+        open_price NUMERIC,
+        close_price NUMERIC,
+        high_price NUMERIC,
+        low_price NUMERIC,
+        total_volume NUMERIC,
+        PRIMARY KEY (symbol, trade_date)
+      );
+    `);
+    
+    // k_hill_alerts (if not exists, based on usage in server.js)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS k_hill_alerts (
+        id SERIAL PRIMARY KEY,
+        symbol TEXT NOT NULL,
+        bucket_time TIMESTAMPTZ NOT NULL,
+        volume NUMERIC,
+        baseline_volume NUMERIC,
+        breakout_ratio NUMERIC,
+        hill_data JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    // app_settings (if not exists)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        value_type TEXT,
+        description TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+    `);
+
+    console.log('Tables ensured');
+  } catch (err) {
+    console.error('Error ensuring tables:', err);
+  } finally {
+    client.release();
+  }
+}
 
 // Load ETF exclusion list
 let etfList = [];
@@ -322,6 +423,9 @@ app.get('/api/ranking', async (req, res) => {
     
     // 如果没有 ETF 列表，传递空数组，避免 SQL 语法错误
     const safeEtfList = etfList.length > 0 ? etfList : ['__NO_ETF__'];
+    
+    const minVolume = Number(req.query.min_volume || 0);
+    const minPriceChange3m = Number(req.query.min_price_change_3m || 0);
 
     const sql = `
       WITH avg_vol AS (
@@ -336,6 +440,17 @@ app.get('/api/ranking', async (req, res) => {
         SELECT symbol, open_price, close_price, total_volume
         FROM market_data.daily_summary
         WHERE trade_date = current_date
+      ),
+      price_3m_ago AS (
+         SELECT t.symbol,
+                (SELECT t1.price 
+                 FROM tos_trades t1 
+                 WHERE t1.symbol = t.symbol 
+                   AND t1.received_at <= NOW() - INTERVAL '3 minutes'
+                   AND t1.received_at >= NOW() - INTERVAL '30 minutes'
+                 ORDER BY t1.received_at DESC 
+                 LIMIT 1) as price
+         FROM today t
       )
       SELECT 
         t.symbol,
@@ -344,16 +459,29 @@ app.get('/api/ranking', async (req, res) => {
         (t.close_price - t.open_price) AS change_amount,
         ROUND((t.close_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
         t.total_volume,
-        ROUND(a.avg_vol) AS avg_vol_10d
+        ROUND(a.avg_vol) AS avg_vol_10d,
+        COALESCE(p3.price, t.open_price) as price_3m,
+        (t.close_price - COALESCE(p3.price, t.open_price)) as price_change_3m
       FROM today t
       JOIN avg_vol a USING (symbol)
+      LEFT JOIN price_3m_ago p3 ON t.symbol = p3.symbol
       WHERE NOT (t.symbol = ANY($1::text[]))
         AND t.open_price > 0
+        AND t.total_volume >= $2
       ORDER BY (t.close_price - t.open_price) DESC;
     `;
+    
+    const { rows } = await pool.query(sql, [safeEtfList, minVolume]);
+    
+    // Filter by 3m price change if requested (doing it in JS to avoid complex SQL nesting for now)
+    const filteredRows = rows.filter(row => {
+        if (minPriceChange3m > 0) {
+            return Math.abs(Number(row.price_change_3m)) >= minPriceChange3m;
+        }
+        return true;
+    });
 
-    const { rows } = await pool.query(sql, [safeEtfList]);
-    res.json(rows);
+    res.json(filteredRows);
   } catch (e) {
     console.error('ranking query failed:', e);
     res.status(500).json({ error: 'ranking query failed' });
@@ -728,11 +856,19 @@ async function updateDailySummary() {
       FROM tos_trades
       WHERE received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
         AND price IS NOT NULL AND price::numeric > 0
+        AND (
+          -- If current time is morning (< 12:00 Beijing), filter out late afternoon times (> 12:00) from market_time
+          CASE 
+            WHEN (now() AT TIME ZONE 'Asia/Shanghai')::time < '12:00:00'::time THEN market_time::time < '12:00:00'::time
+            ELSE TRUE 
+          END
+        )
       GROUP BY symbol, (received_at AT TIME ZONE 'Asia/Shanghai')::date
       ON CONFLICT (symbol, trade_date) DO UPDATE SET
+        open_price = EXCLUDED.open_price,
         close_price = EXCLUDED.close_price,
-        high_price = GREATEST(daily_summary.high_price, EXCLUDED.high_price),
-        low_price = LEAST(daily_summary.low_price, EXCLUDED.low_price),
+        high_price = EXCLUDED.high_price,
+        low_price = EXCLUDED.low_price,
         total_volume = EXCLUDED.total_volume;
     `;
     await pool.query(sql);
@@ -944,8 +1080,11 @@ app.get('/ranking', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/ranking.html'));
 });
 
-// 在静态服务与监听之前启动监控（或?listen 之后皆可?
-startAlertMonitor();
+// 启动时确保表存在
+ensureTables().then(() => {
+  // 在静态服务与监听之前启动监控（或?listen 之后皆可?
+  startAlertMonitor();
+});
 
 const PORT = process.env.PORT || 8889;
 const HOST = process.env.HOST || '0.0.0.0';
