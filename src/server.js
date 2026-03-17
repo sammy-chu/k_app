@@ -446,10 +446,31 @@ app.get('/api/ranking', async (req, res) => {
                 (SELECT t1.price 
                  FROM tos_trades t1 
                  WHERE t1.symbol = t.symbol 
-                   AND t1.received_at <= NOW() - INTERVAL '3 minutes'
-                   AND t1.received_at >= NOW() - INTERVAL '30 minutes'
-                 ORDER BY t1.received_at DESC 
-                 LIMIT 1) as price
+                   AND t1.market_time::time <= ((now() AT TIME ZONE 'Asia/Shanghai')::time - INTERVAL '3 minutes')
+                   -- Also filter out yesterday's data based on market_time if it's morning
+                   AND (
+                     CASE 
+                       WHEN (now() AT TIME ZONE 'Asia/Shanghai')::time < '12:00:00'::time THEN t1.market_time::time < '12:00:00'::time
+                       ELSE TRUE 
+                     END
+                   )
+                   -- Use received_at range to limit scan (assuming data is somewhat recent)
+                   AND t1.received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
+                 ORDER BY t1.market_time DESC 
+                 LIMIT 1) as price_3m,
+                 
+                 (SELECT t2.market_time 
+                  FROM tos_trades t2
+                  WHERE t2.symbol = t.symbol
+                    AND t2.received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
+                    AND (
+                      CASE 
+                        WHEN (now() AT TIME ZONE 'Asia/Shanghai')::time < '12:00:00'::time THEN t2.market_time::time < '12:00:00'::time
+                        ELSE TRUE 
+                      END
+                    )
+                  ORDER BY t2.market_time DESC
+                  LIMIT 1) as last_market_time
          FROM today t
       )
       SELECT 
@@ -460,8 +481,15 @@ app.get('/api/ranking', async (req, res) => {
         ROUND((t.close_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
         t.total_volume,
         ROUND(a.avg_vol) AS avg_vol_10d,
-        COALESCE(p3.price, t.open_price) as price_3m,
-        (t.close_price - COALESCE(p3.price, t.open_price)) as price_change_3m
+        
+        -- Logic: If (Now - LastMarketTime) > 3 minutes, then Change = 0.
+        -- Else: Change = LastPrice - Price3mAgo.
+        -- Note: Now needs to be converted to MarketTime format to compare.
+        -- Assuming MarketTime is just HH:MM:SS.
+        CASE 
+            WHEN p3.last_market_time::time < ((now() AT TIME ZONE 'Asia/Shanghai')::time - INTERVAL '3 minutes') THEN 0
+            ELSE (t.close_price - COALESCE(p3.price_3m, t.open_price))
+        END as price_change_3m
       FROM today t
       JOIN avg_vol a USING (symbol)
       LEFT JOIN price_3m_ago p3 ON t.symbol = p3.symbol
