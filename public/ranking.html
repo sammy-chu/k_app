@@ -221,11 +221,11 @@
                 <div class="filters">
                     <div class="filter-item">
                         <label>最小成交量:</label>
-                        <input type="number" id="min-volume" class="filter-input" value="0" onchange="fetchData()">
+                        <input type="number" id="min-volume" class="filter-input" value="0" oninput="debounceFetch()">
                     </div>
                     <div class="filter-item">
                         <label>3分钟波动:</label>
-                        <input type="number" id="min-3m-change" class="filter-input" value="0" step="0.01" onchange="fetchData()">
+                        <input type="number" id="min-3m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()">
                     </div>
                 </div>
                 <span class="refresh-info" id="refresh-timer">1s</span>
@@ -243,6 +243,14 @@
         let sortDirection = 'desc'; // 'asc' or 'desc'
         let timer = null;
         let countdown = 1;
+        let debounceTimer = null;
+
+        function debounceFetch() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(() => {
+                fetchData();
+            }, 500); // Wait 500ms after last input
+        }
 
         function handleSort(column) {
             if (sortColumn === column) {
@@ -255,7 +263,11 @@
             renderTable();
         }
 
+        let isFetching = false;
+
         async function fetchData() {
+            if (isFetching) return;
+            isFetching = true;
             try {
                 const minVol = document.getElementById('min-volume').value;
                 const min3mChange = document.getElementById('min-3m-change').value;
@@ -266,7 +278,14 @@
                 renderTable();
                 resetTimer();
             } catch (err) {
-                document.getElementById('content').innerHTML = `<div class="error">加载失败: ${err.message}</div>`;
+                // Don't wipe content on error, just log it or show toast
+                console.error('Fetch error:', err);
+                // Only show error if we have no data at all
+                if (!currentData || currentData.length === 0) {
+                    document.getElementById('content').innerHTML = `<div class="error">加载失败: ${err.message}</div>`;
+                }
+            } finally {
+                isFetching = false;
             }
         }
 

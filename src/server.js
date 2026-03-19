@@ -127,6 +127,12 @@ async function ensureTables() {
       );
     `);
 
+    // tos_trades indexes for ranking and daily summary queries
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_tos_trades_symbol_received ON tos_trades (symbol, received_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_tos_trades_received ON tos_trades (received_at DESC);
+    `);
+
     console.log('Tables ensured');
   } catch (err) {
     console.error('Error ensuring tables:', err);
@@ -148,6 +154,50 @@ try {
   }
 } catch (err) {
   console.error('Failed to load ETF.csv:', err.message);
+}
+
+// In-memory price snapshot cache: symbol -> { price, receivedAt }
+// Updated every 30s by background task, used by ranking API to avoid slow tos_trades scans
+const priceCache = new Map();
+
+async function updatePriceCache() {
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    const { rows } = await pool.query(`
+      SELECT DISTINCT ON (symbol) symbol, price::numeric AS price, received_at
+      FROM tos_trades
+      WHERE received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
+      ORDER BY symbol, received_at DESC
+    `);
+    for (const row of rows) {
+      priceCache.set(row.symbol, { price: Number(row.price), receivedAt: row.received_at });
+    }
+  } catch (err) {
+    console.error('[PriceCache] Update failed:', err.message);
+  }
+}
+
+// Sliding 3-minute price window: symbol -> array of { price, receivedAt } sorted oldest-first
+const priceWindow = new Map();
+
+async function updatePriceWindow() {
+  try {
+    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    const { rows } = await pool.query(`
+      SELECT symbol, price::numeric AS price, received_at
+      FROM tos_trades
+      WHERE received_at >= NOW() - INTERVAL '4 minutes'
+        AND received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
+      ORDER BY symbol, received_at ASC
+    `);
+    priceWindow.clear();
+    for (const row of rows) {
+      if (!priceWindow.has(row.symbol)) priceWindow.set(row.symbol, []);
+      priceWindow.get(row.symbol).push({ price: Number(row.price), receivedAt: new Date(row.received_at) });
+    }
+  } catch (err) {
+    console.error('[PriceWindow] Update failed:', err.message);
+  }
 }
 
 app.get('/health', (req, res) => {
@@ -440,73 +490,48 @@ app.get('/api/ranking', async (req, res) => {
         SELECT symbol, open_price, close_price, total_volume
         FROM market_data.daily_summary
         WHERE trade_date = current_date
-      ),
-      price_3m_ago AS (
-         SELECT t.symbol,
-                (SELECT t1.price 
-                 FROM tos_trades t1 
-                 WHERE t1.symbol = t.symbol 
-                   AND t1.market_time::time <= ((now() AT TIME ZONE 'Asia/Shanghai')::time - INTERVAL '3 minutes')
-                   -- Also filter out yesterday's data based on market_time if it's morning
-                   AND (
-                     CASE 
-                       WHEN (now() AT TIME ZONE 'Asia/Shanghai')::time < '12:00:00'::time THEN t1.market_time::time < '12:00:00'::time
-                       ELSE TRUE 
-                     END
-                   )
-                   -- Use received_at range to limit scan (assuming data is somewhat recent)
-                   AND t1.received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
-                 ORDER BY t1.market_time DESC 
-                 LIMIT 1) as price_3m,
-                 
-                 (SELECT t2.market_time 
-                  FROM tos_trades t2
-                  WHERE t2.symbol = t.symbol
-                    AND t2.received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
-                    AND (
-                      CASE 
-                        WHEN (now() AT TIME ZONE 'Asia/Shanghai')::time < '12:00:00'::time THEN t2.market_time::time < '12:00:00'::time
-                        ELSE TRUE 
-                      END
-                    )
-                  ORDER BY t2.market_time DESC
-                  LIMIT 1) as last_market_time
-         FROM today t
       )
-      SELECT 
+      SELECT
         t.symbol,
         t.open_price,
         t.close_price AS last_price,
         (t.close_price - t.open_price) AS change_amount,
         ROUND((t.close_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
         t.total_volume,
-        ROUND(a.avg_vol) AS avg_vol_10d,
-        
-        -- Logic: If (Now - LastMarketTime) > 3 minutes, then Change = 0.
-        -- Else: Change = LastPrice - Price3mAgo.
-        -- Note: Now needs to be converted to MarketTime format to compare.
-        -- Assuming MarketTime is just HH:MM:SS.
-        CASE 
-            WHEN p3.last_market_time::time < ((now() AT TIME ZONE 'Asia/Shanghai')::time - INTERVAL '3 minutes') THEN 0
-            ELSE (t.close_price - COALESCE(p3.price_3m, t.open_price))
-        END as price_change_3m
+        ROUND(a.avg_vol) AS avg_vol_10d
       FROM today t
       JOIN avg_vol a USING (symbol)
-      LEFT JOIN price_3m_ago p3 ON t.symbol = p3.symbol
       WHERE NOT (t.symbol = ANY($1::text[]))
         AND t.open_price > 0
         AND t.total_volume >= $2
       ORDER BY (t.close_price - t.open_price) DESC;
     `;
-    
+
     const { rows } = await pool.query(sql, [safeEtfList, minVolume]);
-    
-    // Filter by 3m price change if requested (doing it in JS to avoid complex SQL nesting for now)
-    const filteredRows = rows.filter(row => {
-        if (minPriceChange3m > 0) {
-            return Math.abs(Number(row.price_change_3m)) >= minPriceChange3m;
+
+    // Compute 3m price change from in-memory cache
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 3 * 60 * 1000);
+    const result = rows.map(row => {
+      const window = priceWindow.get(row.symbol);
+      let price_change_3m = 0;
+      if (window && window.length > 0) {
+        const lastEntry = window[window.length - 1];
+        // If last trade is within 3 minutes, find price 3m ago
+        if (lastEntry.receivedAt >= cutoff) {
+          const entry3m = window.find(e => e.receivedAt <= cutoff);
+          const base = entry3m ? entry3m.price : Number(row.open_price);
+          price_change_3m = Number(row.last_price) - base;
         }
-        return true;
+      }
+      return { ...row, price_change_3m };
+    });
+
+    const filteredRows = result.filter(row => {
+      if (minPriceChange3m > 0) {
+        return Math.abs(Number(row.price_change_3m)) >= minPriceChange3m;
+      }
+      return true;
     });
 
     res.json(filteredRows);
@@ -1075,8 +1100,13 @@ function startAlertMonitor() {
   console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, default_history=${VOLUME_HISTORY_DAYS}d`);
   
   // 3. 独立运行的每日数据汇总 (DailySummaryUpdater)
-  console.log(`[DailySummaryUpdater] starting, interval=1s`);
-  runScan('DailySummaryUpdater', updateDailySummary, 1000);
+  console.log(`[DailySummaryUpdater] starting, interval=30s`);
+  runScan('DailySummaryUpdater', updateDailySummary, 30000);
+
+  // 4. 3分钟价格窗口缓存 (供 ranking API 使用)
+  console.log(`[PriceWindow] starting, interval=10s`);
+  updatePriceWindow(); // warm up immediately
+  runScan('PriceWindow', updatePriceWindow, 10000);
 }
 
 // 静态文件服务
