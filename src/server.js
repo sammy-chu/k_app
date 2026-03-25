@@ -19,6 +19,7 @@ app.use((req, res, next) => {
 // 全局配置变量
 
 // 数据库连接池配置
+const pgSchema = process.env.PGSCHEMA || 'market_data';
 const pool = new Pool({
   host: process.env.PGHOST || 'localhost',
   port: Number(process.env.PGPORT || 5432),
@@ -31,13 +32,18 @@ const pool = new Pool({
   statement_timeout: 30000,
 });
 
+// Set search_path on every new connection so all queries use the correct schema
+pool.on('connect', (client) => {
+  client.query('SET search_path TO ' + pgSchema);
+});
+
 // Initialize ConfigManager
 const config = new ConfigManager(pool);
 
 async function ensureTables() {
   const client = await pool.connect();
   try {
-    await client.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    await client.query('SET search_path TO ' + pgSchema);
     
     // k_alerts
     await client.query(`
@@ -128,10 +134,18 @@ async function ensureTables() {
     `);
 
     // tos_trades indexes for ranking and daily summary queries
+    // Use a longer timeout for index creation on large tables
+    await client.query('SET statement_timeout = 300000'); // 5 minutes for DDL
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_tos_trades_symbol_received ON tos_trades (symbol, received_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tos_trades_received ON tos_trades (received_at DESC);
     `);
+
+    // Index on daily_summary(trade_date) to speed up date-range ranking queries
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_daily_summary_trade_date ON daily_summary (trade_date);
+    `);
+    await client.query('SET statement_timeout = 30000'); // restore default
 
     console.log('Tables ensured');
   } catch (err) {
@@ -162,7 +176,7 @@ const priceCache = new Map();
 
 async function updatePriceCache() {
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
     const { rows } = await pool.query(`
       SELECT DISTINCT ON (symbol) symbol, price::numeric AS price, received_at
       FROM tos_trades
@@ -182,7 +196,7 @@ const priceWindow = new Map();
 
 async function updatePriceWindow() {
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
     const { rows } = await pool.query(`
       SELECT symbol, price::numeric AS price, received_at
       FROM tos_trades
@@ -212,7 +226,7 @@ app.get('/api/price-snapshot', async (req, res) => {
     
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
 
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
 
     // 1. 获取最新价格
     // 使用 received_at 替代 trade_time，因为 trade_time 是文本格式且不包含日期，无法准确排序/比较
@@ -259,7 +273,7 @@ app.get('/api/ohlcv', async (req, res) => {
     const date = String(req.query.date || '').trim();
     if (!symbol || !date) return res.status(400).json({ error: 'symbol and date required' });
     
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
 
     const sql = `
       WITH params AS (
@@ -406,7 +420,7 @@ app.post('/api/settings/trigger-volume-scan', async (req, res) => {
 // 数据库测试路�?
 app.get('/api/test-db', async (req, res) => {
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
     
     // 测试表是否存�?
     const tableCheck = await pool.query(`
@@ -445,7 +459,7 @@ app.get('/api/test-db', async (req, res) => {
 // 提醒查询接口
 app.get('/api/alerts', async (req, res) => {
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
     const since = req.query.since || null;
     const limit = Math.min(Number(req.query.limit || 50), 200);
     const ruleId = req.query.rule_id || 'amplitude_1pct';
@@ -466,66 +480,86 @@ app.get('/api/alerts', async (req, res) => {
   }
 });
 
-// 排行榜 API
-app.get('/api/ranking', async (req, res) => {
+// === Ranking 缓存 ===
+let rankingCache = [];       // 缓存的 ranking 行数据
+let rankingCacheTime = null; // 上次成功刷新时间
+
+async function refreshRankingCache() {
+  const safeEtfList = etfList.length > 0 ? etfList : ['__NO_ETF__'];
+  const sql = `
+    WITH avg_vol AS (
+      SELECT symbol, AVG(total_volume) AS avg_vol
+      FROM market_data.daily_summary
+      WHERE trade_date >= current_date - 10
+        AND trade_date < current_date
+      GROUP BY symbol
+      HAVING AVG(total_volume) >= 1000
+    ),
+    today AS (
+      SELECT symbol, open_price, close_price, total_volume
+      FROM market_data.daily_summary
+      WHERE trade_date = current_date
+    )
+    SELECT
+      t.symbol,
+      t.open_price,
+      t.close_price AS last_price,
+      (t.close_price - t.open_price) AS change_amount,
+      ROUND((t.close_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
+      t.total_volume,
+      ROUND(a.avg_vol) AS avg_vol_10d
+    FROM today t
+    JOIN avg_vol a USING (symbol)
+    WHERE NOT (t.symbol = ANY($1::text[]))
+      AND t.open_price > 0
+    ORDER BY (t.close_price - t.open_price) DESC;
+  `;
+  const client = await pool.connect();
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
-    
-    // 如果没有 ETF 列表，传递空数组，避免 SQL 语法错误
-    const safeEtfList = etfList.length > 0 ? etfList : ['__NO_ETF__'];
-    
+    await client.query('SET statement_timeout = 120000');
+    const { rows } = await client.query(sql, [safeEtfList]);
+    rankingCache = rows;
+    rankingCacheTime = new Date();
+    if (rows.length === 0) {
+      const diag = await client.query(`
+        SELECT current_date AS db_date,
+               MIN(trade_date) AS min_date, MAX(trade_date) AS max_date, COUNT(*) AS total
+        FROM market_data.daily_summary
+      `);
+      console.log(`[RankingCache] 0 rows returned. DB current_date=${diag.rows[0].db_date}, data range: ${diag.rows[0].min_date} ~ ${diag.rows[0].max_date}, total=${diag.rows[0].total}`);
+    } else {
+      console.log(`[RankingCache] Refreshed, ${rows.length} rows`);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+// 排行榜 API — 直接返回缓存数据
+app.get('/api/ranking', (req, res) => {
+  try {
     const minVolume = Number(req.query.min_volume || 0);
     const minPriceChange3m = Number(req.query.min_price_change_3m || 0);
 
-    const sql = `
-      WITH avg_vol AS (
-        SELECT symbol, AVG(total_volume) AS avg_vol
-        FROM market_data.daily_summary
-        WHERE trade_date >= current_date - 10
-          AND trade_date < current_date
-        GROUP BY symbol
-        HAVING AVG(total_volume) >= 1000
-      ),
-      today AS (
-        SELECT symbol, open_price, close_price, total_volume
-        FROM market_data.daily_summary
-        WHERE trade_date = current_date
-      )
-      SELECT
-        t.symbol,
-        t.open_price,
-        t.close_price AS last_price,
-        (t.close_price - t.open_price) AS change_amount,
-        ROUND((t.close_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
-        t.total_volume,
-        ROUND(a.avg_vol) AS avg_vol_10d
-      FROM today t
-      JOIN avg_vol a USING (symbol)
-      WHERE NOT (t.symbol = ANY($1::text[]))
-        AND t.open_price > 0
-        AND t.total_volume >= $2
-      ORDER BY (t.close_price - t.open_price) DESC;
-    `;
-
-    const { rows } = await pool.query(sql, [safeEtfList, minVolume]);
-
-    // Compute 3m price change from in-memory cache
+    // Filter cached data by request params
     const now = new Date();
     const cutoff = new Date(now.getTime() - 3 * 60 * 1000);
-    const result = rows.map(row => {
-      const window = priceWindow.get(row.symbol);
-      let price_change_3m = 0;
-      if (window && window.length > 0) {
-        const lastEntry = window[window.length - 1];
-        // If last trade is within 3 minutes, find price 3m ago
-        if (lastEntry.receivedAt >= cutoff) {
-          const entry3m = window.find(e => e.receivedAt <= cutoff);
-          const base = entry3m ? entry3m.price : Number(row.open_price);
-          price_change_3m = Number(row.last_price) - base;
+
+    const result = rankingCache
+      .filter(row => Number(row.total_volume) >= minVolume)
+      .map(row => {
+        const window = priceWindow.get(row.symbol);
+        let price_change_3m = 0;
+        if (window && window.length > 0) {
+          const lastEntry = window[window.length - 1];
+          if (lastEntry.receivedAt >= cutoff) {
+            const entry3m = window.find(e => e.receivedAt <= cutoff);
+            const base = entry3m ? entry3m.price : Number(row.open_price);
+            price_change_3m = Number(row.last_price) - base;
+          }
         }
-      }
-      return { ...row, price_change_3m };
-    });
+        return { ...row, price_change_3m };
+      });
 
     const filteredRows = result.filter(row => {
       if (minPriceChange3m > 0) {
@@ -610,7 +644,7 @@ app.post('/api/volume/daily-refresh', async (req, res) => {
   }
 
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
     
     // 2. 执行 Upsert (存在更新，不存在插入)
     const sql = `
@@ -652,7 +686,7 @@ app.get('/api/volume/summary', async (req, res) => {
     return res.status(400).json({ error: 'invalid_date_format' });
   }
 
-  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
   
   // 1. 动态排序字段
   const orderBy = order === 'avg' ? 'avg_volume' : 'total_volume';
@@ -689,7 +723,7 @@ app.get('/api/volume/avg-daily', async (req, res) => {
   
   if (!symbol || !isValidDate(start) || !isValidDate(end)) return res.status(400).json({ error: 'invalid_params' });
   
-  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
   
   const sql = `
     SELECT COALESCE(AVG(daily_volume), 0) AS avg_daily_vol
@@ -707,7 +741,7 @@ app.get('/api/volume/cumulative', async (req, res) => {
   
   if (!symbol || !isValidDate(date)) return res.status(400).json({ error: 'invalid_params' });
   
-  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
   
   const sql = `
     SELECT COALESCE(SUM(size), 0) AS cumulative_vol
@@ -729,7 +763,7 @@ app.post('/api/alerts/daily-volume-pct/scan', async (req, res) => {
     return res.status(400).json({ error: 'params_missing_or_invalid' });
   }
   
-  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
 
   // 1. 获取历史均量
   const avgRes = await pool.query(
@@ -772,7 +806,7 @@ app.post('/api/alerts/daily-volume-pct/scan', async (req, res) => {
 // 新增：成交量提醒查询接口
 app.get('/api/volume-alerts-data', async (req, res) => {
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
     const limit = Math.min(Number(req.query.limit || 50), 200);
 
     const sql = `
@@ -791,7 +825,7 @@ app.get('/api/volume-alerts-data', async (req, res) => {
 
 async function scanAndInsertAlerts() {
   try {
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+
 
     // 扫描当前分钟与上一分钟，聚�?O/H/L/C 并触发提�?
     const sql = `
@@ -893,12 +927,13 @@ async function ensureVolumeAlertSchema() {
 
 // Update daily_summary table with today's data
 async function updateDailySummary() {
+  const client = await pool.connect();
   try {
     const start = Date.now();
-    await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+    await client.query('SET statement_timeout = 120000'); // 2 minutes for heavy aggregation
     const sql = `
       INSERT INTO market_data.daily_summary (symbol, trade_date, open_price, close_price, high_price, low_price, total_volume)
-      SELECT 
+      SELECT
         symbol,
         (received_at AT TIME ZONE 'Asia/Shanghai')::date,
         (array_agg(price::numeric ORDER BY received_at ASC))[1],
@@ -910,10 +945,9 @@ async function updateDailySummary() {
       WHERE received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
         AND price IS NOT NULL AND price::numeric > 0
         AND (
-          -- If current time is morning (< 12:00 Beijing), filter out late afternoon times (> 12:00) from market_time
-          CASE 
+          CASE
             WHEN (now() AT TIME ZONE 'Asia/Shanghai')::time < '12:00:00'::time THEN market_time::time < '12:00:00'::time
-            ELSE TRUE 
+            ELSE TRUE
           END
         )
       GROUP BY symbol, (received_at AT TIME ZONE 'Asia/Shanghai')::date
@@ -924,16 +958,17 @@ async function updateDailySummary() {
         low_price = EXCLUDED.low_price,
         total_volume = EXCLUDED.total_volume;
     `;
-    await pool.query(sql);
+    await client.query(sql);
     const duration = Date.now() - start;
     // console.log(`[DailySummary] Updated in ${duration}ms`);
   } catch (err) {
     console.error('[DailySummary] Update failed:', err.message);
+  } finally {
+    client.release();
   }
 }
 
 async function scanAllVolumeAlerts() {
-  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
   await ensureVolumeAlertSchema();
 
   // Load dynamic configuration
@@ -1103,7 +1138,11 @@ function startAlertMonitor() {
   console.log(`[DailySummaryUpdater] starting, interval=30s`);
   runScan('DailySummaryUpdater', updateDailySummary, 30000);
 
-  // 4. 3分钟价格窗口缓存 (供 ranking API 使用)
+  // 4. Ranking 缓存后台刷新 (每30秒)
+  console.log(`[RankingCache] starting, interval=30s`);
+  runScan('RankingCache', refreshRankingCache, 30000);
+
+  // 5. 3分钟价格窗口缓存 (供 ranking API 使用)
   console.log(`[PriceWindow] starting, interval=10s`);
   updatePriceWindow(); // warm up immediately
   runScan('PriceWindow', updatePriceWindow, 10000);
