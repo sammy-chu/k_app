@@ -596,6 +596,8 @@ app.get('/api/large-orders-screener', async (req, res) => {
     const side = req.query.side || 'all'; // 'bid', 'ask', or 'all'
     const minTotalVolume = Number(req.query.min_total_volume || 0);
     const timeWindowMins = Number(req.query.time_window_mins || 5);
+    const minPrice = Number(req.query.min_price || 0);
+    const maxPrice = Number(req.query.max_price || 999999);
 
     let sideFilter = '';
     if (side === 'bid') sideFilter = "AND o.side = 'bid'";
@@ -617,11 +619,13 @@ app.get('/api/large-orders-screener', async (req, res) => {
       JOIN market_data.daily_summary d ON o.symbol = d.symbol
       WHERE d.trade_date = CURRENT_DATE
         AND d.total_volume >= $3
+        AND d.close_price >= $4
+        AND d.close_price <= $5
       ORDER BY o.detected_at DESC
       LIMIT 100
     `;
 
-    const { rows } = await pool.query(sql, [timeWindowMins, minOrderVolume, minTotalVolume]);
+    const { rows } = await pool.query(sql, [timeWindowMins, minOrderVolume, minTotalVolume, minPrice, maxPrice]);
     res.json(rows);
   } catch (e) {
     console.error('Large orders screener error:', e);
