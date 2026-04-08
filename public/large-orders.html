@@ -32,5 +32,51 @@
             </tbody>
         </table>
     </div>
+    <script>
+        async function fetchData() {
+            try {
+                // 暂时使用硬编码参数测试，下一步再做动态表单
+                const res = await fetch('/api/large-orders-screener?min_order_volume=1000&time_window_mins=60');
+                if (!res.ok) throw new Error('Network response error');
+                const data = await res.json();
+                renderTable(data);
+            } catch (err) {
+                console.error('Fetch error:', err);
+                document.getElementById('table-body').innerHTML = `<tr><td colspan="7" style="color:red;">加载失败: ${err.message}</td></tr>`;
+            }
+        }
+
+        function renderTable(data) {
+            const tbody = document.getElementById('table-body');
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">暂无符合条件的大单数据</td></tr>';
+                return;
+            }
+            
+            let html = '';
+            data.forEach(row => {
+                const sideColor = row.side === 'bid' ? '#26a69a' : '#ef5350';
+                const sideText = row.side === 'bid' ? '买盘' : '卖盘';
+                const timeStr = new Date(row.detected_at).toLocaleTimeString();
+                
+                html += `
+                    <tr>
+                        <td style="font-weight:bold;">${row.symbol}</td>
+                        <td style="color:${sideColor};">${sideText} (L${row.level})</td>
+                        <td>${Number(row.order_price).toFixed(2)}</td>
+                        <td>${Number(row.current_price).toFixed(2)}</td>
+                        <td>${row.order_volume}</td>
+                        <td>${row.total_volume}</td>
+                        <td style="color:#888;">${timeStr}</td>
+                    </tr>
+                `;
+            });
+            tbody.innerHTML = html;
+        }
+
+        // 初始加载与自动刷新
+        fetchData();
+        setInterval(fetchData, 5000); // 每 5 秒刷新一次
+    </script>
 </body>
 </html>
