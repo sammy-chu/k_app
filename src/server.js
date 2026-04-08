@@ -586,6 +586,46 @@ app.get('/api/ranking', (req, res) => {
   }
 });
 
+// === 大单监控筛选器 API ===
+app.get('/api/large-orders-screener', async (req, res) => {
+  try {
+    const minOrderVolume = Number(req.query.min_order_volume || 1000);
+    const side = req.query.side || 'all'; // 'bid', 'ask', or 'all'
+    const minTotalVolume = Number(req.query.min_total_volume || 0);
+    const timeWindowMins = Number(req.query.time_window_mins || 5);
+
+    let sideFilter = '';
+    if (side === 'bid') sideFilter = "AND o.side = 'bid'";
+    if (side === 'ask') sideFilter = "AND o.side = 'ask'";
+
+    const sql = `
+      WITH recent_large_orders AS (
+        SELECT DISTINCT ON (stock_code, side)
+            stock_code AS symbol, side, level, price AS order_price, volume AS order_volume, detected_at
+        FROM market_data.l2_large_orders_bl
+        WHERE detected_at >= NOW() - ($1 || ' minutes')::interval
+          AND volume >= $2
+          ${sideFilter}
+        ORDER BY stock_code, side, detected_at DESC
+      )
+      SELECT o.symbol, o.side, o.level, o.order_price, o.order_volume, o.detected_at,
+             d.open_price, d.close_price AS current_price, d.total_volume
+      FROM recent_large_orders o
+      JOIN market_data.daily_summary d ON o.symbol = d.symbol
+      WHERE d.trade_date = CURRENT_DATE
+        AND d.total_volume >= $3
+      ORDER BY o.detected_at DESC
+      LIMIT 100
+    `;
+
+    const { rows } = await pool.query(sql, [timeWindowMins, minOrderVolume, minTotalVolume]);
+    res.json(rows);
+  } catch (e) {
+    console.error('Large orders screener error:', e);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // === 山丘形放量查询 API (Flexible Hills) ===
 app.get('/api/patterns/flexible-hills', async (req, res) => {
   try {
