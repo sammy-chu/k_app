@@ -565,8 +565,11 @@ app.get('/api/ranking', (req, res) => {
           const lastEntry = window[window.length - 1];
           if (lastEntry.receivedAt >= cutoff) {
             const entry3m = window.find(e => e.receivedAt <= cutoff);
-            const base = entry3m ? entry3m.price : Number(row.open_price);
-            price_change_3m = Number(row.last_price) - base;
+            if (entry3m) {
+              const base = entry3m.price;
+              price_change_3m = Number(row.last_price) - base;
+            }
+            // If entry3m is not found, price_change_3m remains 0
           }
         }
         return { ...row, price_change_3m };
