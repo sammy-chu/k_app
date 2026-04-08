@@ -129,7 +129,18 @@ async function ensureTables() {
         value TEXT,
         value_type TEXT,
         description TEXT,
+        min_value NUMERIC,
+        max_value NUMERIC,
         updated_at TIMESTAMPTZ DEFAULT NOW()
+      );
+      
+      CREATE TABLE IF NOT EXISTS settings_change_log (
+        id SERIAL PRIMARY KEY,
+        key TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        changed_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
       );
     `);
 
