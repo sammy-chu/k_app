@@ -15,18 +15,26 @@
     <div class="container">
         <h2>大单监控筛选 (大单表 + 今日量价)</h2>
         <div style="margin-bottom: 15px; background: #2a2a2a; padding: 15px; border-radius: 5px;">
-            <label>最小挂单量: <input type="number" id="min-order-vol" value="1000"></label>
-            <label style="margin-left:15px;">日总成交量: <input type="number" id="min-total-vol" value="0"></label>
-            <label style="margin-left:15px;">最低价: <input type="number" id="min-price" value="0" step="0.01"></label>
-            <label style="margin-left:15px;">最高价: <input type="number" id="max-price" value="999999" step="0.01"></label>
-            <label style="margin-left:15px;">监控时间窗口(分钟): <input type="number" id="time-window" value="60"></label>
-            <label style="margin-left:15px;">方向: 
-                <select id="side-filter">
-                    <option value="all">全部</option>
-                    <option value="bid">只看买盘</option>
-                    <option value="ask">只看卖盘</option>
-                </select>
-            </label>
+            <div style="margin-bottom: 10px;">
+                <label>最小挂单量: <input type="number" id="min-order-vol" value="1000"></label>
+                <label style="margin-left:15px;">日总成交量: <input type="number" id="min-total-vol" value="0"></label>
+                <label style="margin-left:15px;">监控时间窗口(分钟): <input type="number" id="time-window" value="60"></label>
+                <label style="margin-left:15px;">方向: 
+                    <select id="side-filter">
+                        <option value="all">全部</option>
+                        <option value="bid">只看买盘</option>
+                        <option value="ask">只看卖盘</option>
+                    </select>
+                </label>
+            </div>
+            <div>
+                <label>最新价: 
+                    <input type="number" id="min-price" placeholder="最低价" style="width: 80px;"> 
+                    - 
+                    <input type="number" id="max-price" placeholder="最高价" style="width: 80px;">
+                </label>
+                <span style="font-size: 0.9em; color: #888; margin-left: 10px;">(前端过滤)</span>
+            </div>
         </div>
         <table>
             <thead>
@@ -51,18 +59,31 @@
         function buildUrl() {
             const minOrderVol = document.getElementById('min-order-vol').value || 0;
             const minTotalVol = document.getElementById('min-total-vol').value || 0;
-            const minPrice = document.getElementById('min-price').value || 0;
-            const maxPrice = document.getElementById('max-price').value || 999999;
             const timeWindow = document.getElementById('time-window').value || 5;
             const side = document.getElementById('side-filter').value;
-            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&min_total_volume=${minTotalVol}&min_price=${minPrice}&max_price=${maxPrice}&time_window_mins=${timeWindow}&side=${side}`;
+            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&min_total_volume=${minTotalVol}&time_window_mins=${timeWindow}&side=${side}`;
         }
 
         async function fetchData() {
             try {
                 const res = await fetch(buildUrl());
                 if (!res.ok) throw new Error('Network response error');
-                const data = await res.json();
+                let data = await res.json();
+                
+                // --- 前端过滤：最新价区间 ---
+                const minPriceStr = document.getElementById('min-price').value;
+                const maxPriceStr = document.getElementById('max-price').value;
+                
+                if (minPriceStr !== '' || maxPriceStr !== '') {
+                    const minPrice = minPriceStr !== '' ? Number(minPriceStr) : -Infinity;
+                    const maxPrice = maxPriceStr !== '' ? Number(maxPriceStr) : Infinity;
+                    
+                    data = data.filter(row => {
+                        const currentPrice = Number(row.current_price);
+                        return currentPrice >= minPrice && currentPrice <= maxPrice;
+                    });
+                }
+                
                 renderTable(data);
             } catch (err) {
                 console.error('Fetch error:', err);
@@ -99,7 +120,7 @@
         }
 
         // 绑定事件
-        ['min-order-vol', 'min-total-vol', 'min-price', 'max-price', 'time-window', 'side-filter'].forEach(id => {
+        ['min-order-vol', 'min-total-vol', 'time-window', 'side-filter', 'min-price', 'max-price'].forEach(id => {
             document.getElementById(id).addEventListener('change', () => {
                 fetchData();
                 // 重置定时器
