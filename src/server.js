@@ -1228,6 +1228,11 @@ app.get('/ranking', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/ranking.html'));
 });
 
+// 大单监控页面路由
+app.get('/large-orders', (req, res) => {
+  res.sendFile(path.join(__dirname, '../public/large-orders.html'));
+});
+
 // 启动时确保表存在
 ensureTables().then(() => {
   // 在静态服务与监听之前启动监控（或?listen 之后皆可?

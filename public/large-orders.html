@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>大单监控筛选</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: #ddd; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 10px; border: 1px solid #444; text-align: left; }
+        th { background: #333; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>大单监控筛选 (大单表 + 今日量价)</h2>
+        <!-- Step 3 会在这里加过滤表单 -->
+        <table>
+            <thead>
+                <tr>
+                    <th>股票代码</th>
+                    <th>方向</th>
+                    <th>挂单价</th>
+                    <th>最新价</th>
+                    <th>挂单量</th>
+                    <th>日总成交量</th>
+                    <th>发现时间</th>
+                </tr>
+            </thead>
+            <tbody id="table-body">
+                <tr><td colspan="7">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>
