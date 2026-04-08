@@ -14,7 +14,18 @@
 <body>
     <div class="container">
         <h2>大单监控筛选 (大单表 + 今日量价)</h2>
-        <!-- Step 3 会在这里加过滤表单 -->
+        <div style="margin-bottom: 15px; background: #2a2a2a; padding: 15px; border-radius: 5px;">
+            <label>最小挂单量: <input type="number" id="min-order-vol" value="1000"></label>
+            <label style="margin-left:15px;">日总成交量: <input type="number" id="min-total-vol" value="0"></label>
+            <label style="margin-left:15px;">监控时间窗口(分钟): <input type="number" id="time-window" value="60"></label>
+            <label style="margin-left:15px;">方向: 
+                <select id="side-filter">
+                    <option value="all">全部</option>
+                    <option value="bid">只看买盘</option>
+                    <option value="ask">只看卖盘</option>
+                </select>
+            </label>
+        </div>
         <table>
             <thead>
                 <tr>
@@ -33,10 +44,19 @@
         </table>
     </div>
     <script>
+        let fetchTimer;
+        
+        function buildUrl() {
+            const minOrderVol = document.getElementById('min-order-vol').value || 0;
+            const minTotalVol = document.getElementById('min-total-vol').value || 0;
+            const timeWindow = document.getElementById('time-window').value || 5;
+            const side = document.getElementById('side-filter').value;
+            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&min_total_volume=${minTotalVol}&time_window_mins=${timeWindow}&side=${side}`;
+        }
+
         async function fetchData() {
             try {
-                // 暂时使用硬编码参数测试，下一步再做动态表单
-                const res = await fetch('/api/large-orders-screener?min_order_volume=1000&time_window_mins=60');
+                const res = await fetch(buildUrl());
                 if (!res.ok) throw new Error('Network response error');
                 const data = await res.json();
                 renderTable(data);
@@ -74,9 +94,19 @@
             tbody.innerHTML = html;
         }
 
+        // 绑定事件
+        ['min-order-vol', 'min-total-vol', 'time-window', 'side-filter'].forEach(id => {
+            document.getElementById(id).addEventListener('change', () => {
+                fetchData();
+                // 重置定时器
+                clearInterval(fetchTimer);
+                fetchTimer = setInterval(fetchData, 5000);
+            });
+        });
+
         // 初始加载与自动刷新
         fetchData();
-        setInterval(fetchData, 5000); // 每 5 秒刷新一次
+        fetchTimer = setInterval(fetchData, 5000); // 每 5 秒刷新一次
     </script>
 </body>
 </html>
