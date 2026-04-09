@@ -206,9 +206,10 @@ async function updatePriceCache() {
 const priceWindow = new Map();
 
 async function updatePriceWindow() {
+  const client = await pool.connect();
   try {
-
-    const { rows } = await pool.query(`
+    await client.query('SET statement_timeout = 10000'); // 10s timeout
+    const { rows } = await client.query(`
       SELECT symbol, price::numeric AS price, received_at
       FROM tos_trades
       WHERE received_at >= NOW() - INTERVAL '4 minutes'
@@ -222,6 +223,8 @@ async function updatePriceWindow() {
     }
   } catch (err) {
     console.error('[PriceWindow] Update failed:', err.message);
+  } finally {
+    client.release();
   }
 }
 

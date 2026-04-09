@@ -42,7 +42,6 @@ async function getFlexibleHills(pool, dateStr) {
         SUM(t.size) as volume,
         AVG(t.price) as avg_price
       FROM tos_trades t
-      JOIN user_symbols u ON t.symbol = u.symbol
       WHERE 
         DATE(t.received_at) = $1::date
       GROUP BY 1, 2
