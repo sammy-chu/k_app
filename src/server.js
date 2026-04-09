@@ -593,12 +593,7 @@ app.get('/api/ranking', (req, res) => {
 app.get('/api/large-orders-screener', async (req, res) => {
   try {
     const minOrderVolume = Number(req.query.min_order_volume || 1000);
-    const side = req.query.side || 'all'; // 'bid', 'ask', or 'all'
     const timeWindowMins = Number(req.query.time_window_mins || 5);
-
-    let sideFilter = '';
-    if (side === 'bid') sideFilter = "AND o.side = 'bid'";
-    if (side === 'ask') sideFilter = "AND o.side = 'ask'";
 
     const sql = `
       WITH recent_large_orders AS (
@@ -607,7 +602,6 @@ app.get('/api/large-orders-screener', async (req, res) => {
         FROM market_data.l2_large_orders_bl
         WHERE detected_at >= NOW() - ($1 || ' minutes')::interval
           AND volume >= $2
-          ${sideFilter}
         ORDER BY stock_code, side, detected_at DESC
       )
       SELECT o.symbol, o.side, o.level, o.order_price, o.order_volume, o.detected_at,

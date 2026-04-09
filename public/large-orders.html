@@ -25,6 +25,7 @@
                         <option value="bid">只看买盘</option>
                         <option value="ask">只看卖盘</option>
                     </select>
+                    <span style="font-size: 0.9em; color: #888;">(前端过滤)</span>
                 </label>
             </div>
             <div>
@@ -59,8 +60,7 @@
         function buildUrl() {
             const minOrderVol = document.getElementById('min-order-vol').value || 0;
             const timeWindow = document.getElementById('time-window').value || 5;
-            const side = document.getElementById('side-filter').value;
-            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&time_window_mins=${timeWindow}&side=${side}`;
+            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&time_window_mins=${timeWindow}`;
         }
 
         async function fetchData() {
@@ -69,6 +69,12 @@
                 if (!res.ok) throw new Error('Network response error');
                 let data = await res.json();
                 
+                // --- 前端过滤：买卖方向 ---
+                const side = document.getElementById('side-filter').value;
+                if (side !== 'all') {
+                    data = data.filter(row => row.side === side);
+                }
+
                 // --- 前端过滤：日总成交量 ---
                 const minTotalVolStr = document.getElementById('min-total-vol').value;
                 const minTotalVol = minTotalVolStr !== '' ? Number(minTotalVolStr) : 0;
