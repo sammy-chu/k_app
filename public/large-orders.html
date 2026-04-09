@@ -138,13 +138,13 @@
                 fetchData();
                 // 重置定时器
                 clearInterval(fetchTimer);
-                fetchTimer = setInterval(fetchData, 5000);
+                fetchTimer = setInterval(fetchData, 1000);
             });
         });
 
         // 初始加载与自动刷新
         fetchData();
-        fetchTimer = setInterval(fetchData, 5000); // 每 5 秒刷新一次
+        fetchTimer = setInterval(fetchData, 1000); // 每 1 秒刷新一次
     </script>
 </body>
 </html>
