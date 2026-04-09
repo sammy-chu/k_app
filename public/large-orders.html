@@ -46,11 +46,10 @@
                     <th>最新价</th>
                     <th>挂单量</th>
                     <th>日总成交量</th>
-                    <th>发现时间</th>
                 </tr>
             </thead>
             <tbody id="table-body">
-                <tr><td colspan="7">加载中...</td></tr>
+                <tr><td colspan="6">加载中...</td></tr>
             </tbody>
         </table>
     </div>
@@ -107,7 +106,7 @@
         function renderTable(data) {
             const tbody = document.getElementById('table-body');
             if (data.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">暂无符合条件的大单数据</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">暂无符合条件的大单数据</td></tr>';
                 return;
             }
             
@@ -115,7 +114,6 @@
             data.forEach(row => {
                 const sideColor = row.side === 'bid' ? '#26a69a' : '#ef5350';
                 const sideText = row.side === 'bid' ? '买盘' : '卖盘';
-                const timeStr = new Date(row.detected_at).toLocaleTimeString();
                 
                 html += `
                     <tr>
@@ -125,7 +123,6 @@
                         <td>${Number(row.current_price).toFixed(2)}</td>
                         <td>${row.order_volume}</td>
                         <td>${row.total_volume}</td>
-                        <td style="color:#888;">${timeStr}</td>
                     </tr>
                 `;
             });
