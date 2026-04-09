@@ -7,8 +7,11 @@
         body { font-family: sans-serif; background: #1a1a1a; color: #ddd; padding: 20px; }
         .container { max-width: 1200px; margin: 0 auto; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 10px; border: 1px solid #444; text-align: left; }
+        th, td { padding: 10px; border: 1px solid #444; text-align: left; transition: background-color 0.5s ease; }
         th { background: #333; }
+        .flash-up { background-color: rgba(38, 166, 154, 0.4) !important; }
+        .flash-down { background-color: rgba(239, 83, 80, 0.4) !important; }
+        .flash-new { background-color: rgba(255, 255, 255, 0.2) !important; }
     </style>
 </head>
 <body>
@@ -55,6 +58,7 @@
     </div>
     <script>
         let fetchTimer;
+        let displayedOrders = []; // 前端状态队列，最多保留 20 条
         
         function buildUrl() {
             const minOrderVol = document.getElementById('min-order-vol').value || 0;
@@ -105,28 +109,88 @@
 
         function renderTable(data) {
             const tbody = document.getElementById('table-body');
-            if (data.length === 0) {
+            
+            // 处理清空数据的情况
+            if (data.length === 0 && displayedOrders.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">暂无符合条件的大单数据</td></tr>';
                 return;
+            } else if (data.length > 0 && tbody.querySelector('td[colspan]')) {
+                tbody.innerHTML = ''; // 清除"加载中"或"暂无数据"提示
             }
-            
-            let html = '';
-            data.forEach(row => {
-                const sideColor = row.side === 'bid' ? '#26a69a' : '#ef5350';
-                const sideText = row.side === 'bid' ? '买盘' : '卖盘';
+
+            // 反向遍历新数据，这样 unshift 才能保持最新的在最上面
+            for (let i = data.length - 1; i >= 0; i--) {
+                const row = data[i];
+                const orderKey = row.symbol + '-' + row.side;
                 
-                html += `
-                    <tr>
+                // 在现有队列中查找
+                const existingIndex = displayedOrders.findIndex(item => item.symbol + '-' + item.side === orderKey);
+                
+                if (existingIndex > -1) {
+                    // 已存在，擦写式更新
+                    const existingData = displayedOrders[existingIndex];
+                    const tr = document.getElementById('row-' + orderKey);
+                    if (tr) {
+                        // 更新最新价
+                        if (Number(existingData.current_price) !== Number(row.current_price)) {
+                            const priceTd = tr.querySelector('.td-price');
+                            const oldPrice = Number(existingData.current_price);
+                            const newPrice = Number(row.current_price);
+                            priceTd.innerText = newPrice.toFixed(2);
+                            
+                            // 闪烁效果
+                            const flashClass = newPrice > oldPrice ? 'flash-up' : 'flash-down';
+                            priceTd.classList.add(flashClass);
+                            setTimeout(() => priceTd.classList.remove(flashClass), 500);
+                        }
+                        
+                        // 更新成交量
+                        if (Number(existingData.total_volume) !== Number(row.total_volume)) {
+                            const volTd = tr.querySelector('.td-vol');
+                            volTd.innerText = row.total_volume;
+                        }
+                        
+                        // 更新挂单价/挂单量
+                        tr.querySelector('.td-order-price').innerText = Number(row.order_price).toFixed(2);
+                        tr.querySelector('.td-order-vol').innerText = row.order_volume;
+                    }
+                    
+                    // 更新内部数据状态
+                    displayedOrders[existingIndex] = row;
+                } else {
+                    // 新数据，插入到头部
+                    displayedOrders.unshift(row);
+                    
+                    const sideColor = row.side === 'bid' ? '#26a69a' : '#ef5350';
+                    const sideText = row.side === 'bid' ? '买盘' : '卖盘';
+                    
+                    const tr = document.createElement('tr');
+                    tr.id = 'row-' + orderKey;
+                    tr.innerHTML = `
                         <td style="font-weight:bold;">${row.symbol}</td>
                         <td style="color:${sideColor};">${sideText} (L${row.level})</td>
-                        <td>${Number(row.order_price).toFixed(2)}</td>
-                        <td>${Number(row.current_price).toFixed(2)}</td>
-                        <td>${row.order_volume}</td>
-                        <td>${row.total_volume}</td>
-                    </tr>
-                `;
-            });
-            tbody.innerHTML = html;
+                        <td class="td-order-price">${Number(row.order_price).toFixed(2)}</td>
+                        <td class="td-price">${Number(row.current_price).toFixed(2)}</td>
+                        <td class="td-order-vol">${row.order_volume}</td>
+                        <td class="td-vol">${row.total_volume}</td>
+                    `;
+                    
+                    // 新行闪烁效果
+                    tr.classList.add('flash-new');
+                    setTimeout(() => tr.classList.remove('flash-new'), 500);
+                    
+                    tbody.insertBefore(tr, tbody.firstChild);
+                }
+            }
+
+            // 保持最多 20 条，溢出的从 DOM 和数组中移除
+            while (displayedOrders.length > 20) {
+                const removedItem = displayedOrders.pop();
+                const trToRemove = document.getElementById('row-' + removedItem.symbol + '-' + removedItem.side);
+                if (trToRemove) {
+                    trToRemove.remove();
+                }
+            }
         }
 
         // 绑定事件
