@@ -17,7 +17,7 @@
         <div style="margin-bottom: 15px; background: #2a2a2a; padding: 15px; border-radius: 5px;">
             <div style="margin-bottom: 10px;">
                 <label>最小挂单量: <input type="number" id="min-order-vol" value="1000"></label>
-                <label style="margin-left:15px;">日总成交量: <input type="number" id="min-total-vol" value="0"></label>
+                <label style="margin-left:15px;">日总成交量: <input type="number" id="min-total-vol" value="0"> <span style="font-size: 0.9em; color: #888;">(前端过滤)</span></label>
                 <label style="margin-left:15px;">监控时间窗口(分钟): <input type="number" id="time-window" value="60"></label>
                 <label style="margin-left:15px;">方向: 
                     <select id="side-filter">
@@ -58,10 +58,9 @@
         
         function buildUrl() {
             const minOrderVol = document.getElementById('min-order-vol').value || 0;
-            const minTotalVol = document.getElementById('min-total-vol').value || 0;
             const timeWindow = document.getElementById('time-window').value || 5;
             const side = document.getElementById('side-filter').value;
-            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&min_total_volume=${minTotalVol}&time_window_mins=${timeWindow}&side=${side}`;
+            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&time_window_mins=${timeWindow}&side=${side}`;
         }
 
         async function fetchData() {
@@ -70,6 +69,14 @@
                 if (!res.ok) throw new Error('Network response error');
                 let data = await res.json();
                 
+                // --- 前端过滤：日总成交量 ---
+                const minTotalVolStr = document.getElementById('min-total-vol').value;
+                const minTotalVol = minTotalVolStr !== '' ? Number(minTotalVolStr) : 0;
+                
+                if (minTotalVol > 0) {
+                    data = data.filter(row => Number(row.total_volume) >= minTotalVol);
+                }
+
                 // --- 前端过滤：最新价区间 ---
                 const minPriceStr = document.getElementById('min-price').value;
                 const maxPriceStr = document.getElementById('max-price').value;
