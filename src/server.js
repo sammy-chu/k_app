@@ -118,7 +118,8 @@ async function ensureTables() {
         baseline_volume NUMERIC,
         breakout_ratio NUMERIC,
         hill_data JSONB,
-        created_at TIMESTAMPTZ DEFAULT NOW()
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        CONSTRAINT uniq_hill_alert UNIQUE(symbol, bucket_time)
       );
     `);
 
@@ -224,6 +225,8 @@ async function updatePriceWindow() {
   } catch (err) {
     console.error('[PriceWindow] Update failed:', err.message);
   } finally {
+    // 务必重置连接的超时时间，以免污染连接池中的连接
+    await client.query('SET statement_timeout = 0').catch(e => console.error(e));
     client.release();
   }
 }
@@ -545,6 +548,7 @@ async function refreshRankingCache() {
       console.log(`[RankingCache] Refreshed, ${rows.length} rows`);
     }
   } finally {
+    await client.query('SET statement_timeout = 0').catch(e => console.error(e));
     client.release();
   }
 }
@@ -1165,6 +1169,45 @@ async function scanAllVolumeAlerts() {
   }
 }
 
+// 山丘形态扫描：复用 getFlexibleHills 检测结果，写入 k_hill_alerts 表
+const HILL_SCAN_INTERVAL = Number(process.env.HILL_SCAN_INTERVAL || 60000); // 1 minute
+async function scanAndInsertHillAlerts() {
+  try {
+    const result = await getFlexibleHills(pool);
+    if (!result || !result.data || result.data.length === 0) return;
+
+    const insertSql = `
+      INSERT INTO k_hill_alerts(symbol, bucket_time, volume, baseline_volume, breakout_ratio, hill_data)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      ON CONFLICT (symbol, bucket_time) DO NOTHING
+      RETURNING id;
+    `;
+
+    let inserted = 0;
+    for (const item of result.data) {
+      const hillDataJson = item.shape.map((v, i) => ({
+        t: i === 0 ? item.startTime : (i === item.shape.length - 1 ? item.endTime : null),
+        v
+      }));
+      const res = await pool.query(insertSql, [
+        item.symbol,
+        item.peakTime,
+        item.peakVol,
+        item.baseline,
+        item.ratio,
+        JSON.stringify(hillDataJson)
+      ]);
+      if (res.rowCount > 0) inserted++;
+    }
+
+    if (inserted > 0) {
+      console.log(`[HillMonitor] Inserted ${inserted} hill alerts (date: ${result.date})`);
+    }
+  } catch (e) {
+    console.error('[HillMonitor] Error:', e.message);
+  }
+}
+
 function startAlertMonitor() {
   const runScan = async (name, fn, interval) => {
     while (true) {
@@ -1207,6 +1250,10 @@ function startAlertMonitor() {
   console.log(`[PriceWindow] starting, interval=10s`);
   updatePriceWindow(); // warm up immediately
   runScan('PriceWindow', updatePriceWindow, 10000);
+
+  // 6. 山丘形态扫描写入 k_hill_alerts (每分钟)
+  console.log(`[HillMonitor] starting, interval=${HILL_SCAN_INTERVAL / 1000}s`);
+  runScan('HillMonitor', scanAndInsertHillAlerts, HILL_SCAN_INTERVAL);
 }
 
 // 静态文件服务

@@ -16,25 +16,28 @@ const dbConfig = {
  * @returns {Promise<Object>} - 结果对象 { date, count, data }
  */
 async function getFlexibleHills(pool, dateStr) {
-  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  const client = await pool.connect();
+  try {
+    await client.query('SET statement_timeout = 120000'); // 2 minutes timeout for heavy query
+    await client.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
 
-  // 1. 获取日期
-  let targetDate = dateStr;
-  if (!targetDate) {
-    const dateRes = await pool.query(`
-      SELECT MAX(DATE(received_at)) as last_date 
-      FROM tos_trades 
-    `);
-    targetDate = dateRes.rows[0].last_date;
+    // 1. 获取日期
+    let targetDate = dateStr;
     if (!targetDate) {
-       // Fallback to current date if no data
-       targetDate = new Date().toISOString().split('T')[0];
+      const dateRes = await client.query(`
+        SELECT MAX(DATE(received_at)) as last_date 
+        FROM tos_trades 
+      `);
+      targetDate = dateRes.rows[0].last_date;
+      if (!targetDate) {
+         // Fallback to current date if no data
+         targetDate = new Date().toISOString().split('T')[0];
+      }
     }
-  }
 
-  // 2. 执行查询
-  // 使用 15分钟 前后窗口以捕捉更完整的山丘
-  const sql = `
+    // 2. 执行查询
+    // 使用 15分钟 前后窗口以捕捉更完整的山丘
+    const sql = `
     WITH raw_data AS (
       SELECT 
         t.symbol,
@@ -94,70 +97,74 @@ async function getFlexibleHills(pool, dateStr) {
     WHERE json_array_length(hill_data) >= 5
   `;
 
-  const { rows } = await pool.query(sql, [targetDate]);
+    const { rows } = await client.query(sql, [targetDate]);
 
-  // 3. 应用层处理
-  const results = [];
-  
-  for (const row of rows) {
-    if (!row.hill_data) continue;
+    // 3. 应用层处理
+    const results = [];
     
-    const data = row.hill_data.sort((a, b) => new Date(a.t) - new Date(b.t));
-    const peakVol = row.peak_volume;
-    const peakIndex = data.findIndex(d => new Date(d.t).getTime() === new Date(row.peak_time).getTime());
-    
-    if (peakIndex === -1) continue;
+    for (const row of rows) {
+      if (!row.hill_data) continue;
+      
+      const data = row.hill_data.sort((a, b) => new Date(a.t) - new Date(b.t));
+      const peakVol = row.peak_volume;
+      const peakIndex = data.findIndex(d => new Date(d.t).getTime() === new Date(row.peak_time).getTime());
+      
+      if (peakIndex === -1) continue;
 
-    let leftIndex = peakIndex;
-    while (leftIndex > 0) {
-      if (data[leftIndex-1].v < peakVol * 0.3 || data[leftIndex-1].v < row.baseline) {
-        leftIndex--; 
-        break; 
+      let leftIndex = peakIndex;
+      while (leftIndex > 0) {
+        if (data[leftIndex-1].v < peakVol * 0.3 || data[leftIndex-1].v < row.baseline) {
+          leftIndex--; 
+          break; 
+        }
+        if (data[leftIndex-1].v > data[leftIndex].v) break;
+        leftIndex--;
       }
-      if (data[leftIndex-1].v > data[leftIndex].v) break;
-      leftIndex--;
-    }
 
-    let rightIndex = peakIndex;
-    while (rightIndex < data.length - 1) {
-      if (data[rightIndex+1].v < peakVol * 0.3 || data[rightIndex+1].v < row.baseline) {
-        rightIndex++; 
-        break;
+      let rightIndex = peakIndex;
+      while (rightIndex < data.length - 1) {
+        if (data[rightIndex+1].v < peakVol * 0.3 || data[rightIndex+1].v < row.baseline) {
+          rightIndex++; 
+          break;
+        }
+        if (data[rightIndex+1].v > data[rightIndex].v) break;
+        rightIndex++;
       }
-      if (data[rightIndex+1].v > data[rightIndex].v) break;
-      rightIndex++;
+
+      const duration = rightIndex - leftIndex + 1;
+      
+      if (duration >= 4) {
+        let totalVol = 0;
+        for(let i=leftIndex; i<=rightIndex; i++) totalVol += data[i].v;
+        const fullness = totalVol / (peakVol * duration);
+
+        results.push({
+          symbol: row.symbol,
+          peakTime: row.peak_time,
+          startTime: data[leftIndex].t, // Added start time
+          endTime: data[rightIndex].t,   // Added end time
+          peakVol: peakVol,
+          baseline: row.baseline,
+          ratio: peakVol / (row.baseline || 1),
+          duration: duration,
+          fullness: fullness,
+          shape: data.slice(leftIndex, rightIndex + 1).map(d => d.v)
+        });
+      }
     }
 
-    const duration = rightIndex - leftIndex + 1;
+    // Sort by peakTime descending (latest first)
+    results.sort((a, b) => new Date(b.peakTime) - new Date(a.peakTime));
     
-    if (duration >= 4) {
-      let totalVol = 0;
-      for(let i=leftIndex; i<=rightIndex; i++) totalVol += data[i].v;
-      const fullness = totalVol / (peakVol * duration);
-
-      results.push({
-        symbol: row.symbol,
-        peakTime: row.peak_time,
-        startTime: data[leftIndex].t, // Added start time
-        endTime: data[rightIndex].t,   // Added end time
-        peakVol: peakVol,
-        baseline: row.baseline,
-        ratio: peakVol / (row.baseline || 1),
-        duration: duration,
-        fullness: fullness,
-        shape: data.slice(leftIndex, rightIndex + 1).map(d => d.v)
-      });
-    }
+    return {
+      date: targetDate,
+      count: results.length,
+      data: results
+    };
+  } finally {
+    await client.query('SET statement_timeout = 0').catch(e => console.error(e));
+    client.release();
   }
-
-  // Sort by peakTime descending (latest first)
-  results.sort((a, b) => new Date(b.peakTime) - new Date(a.peakTime));
-  
-  return {
-    date: targetDate,
-    count: results.length,
-    data: results
-  };
 }
 
 // 独立运行时执行
