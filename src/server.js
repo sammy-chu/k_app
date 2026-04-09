@@ -605,7 +605,7 @@ app.get('/api/large-orders-screener', async (req, res) => {
         ORDER BY stock_code, side, detected_at DESC
       )
       SELECT o.symbol, o.side, o.level, o.order_price, o.order_volume, o.detected_at,
-             d.open_price, d.total_volume
+             d.open_price, d.close_price, d.total_volume
       FROM recent_large_orders o
       JOIN market_data.daily_summary d ON o.symbol = d.symbol
       WHERE d.trade_date = CURRENT_DATE
@@ -618,7 +618,7 @@ app.get('/api/large-orders-screener', async (req, res) => {
     // Inject latest price from memory cache (priceWindow)
     const result = rows.map(row => {
       const window = priceWindow.get(row.symbol);
-      let currentPrice = row.open_price; // Fallback to open price
+      let currentPrice = row.close_price; // Fallback to close_price
       if (window && window.length > 0) {
         // Get the latest trade price from the memory window
         currentPrice = window[window.length - 1].price;
