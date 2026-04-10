@@ -32,7 +32,12 @@
         <div style="margin-bottom: 15px; background: #2a2a2a; padding: 15px; border-radius: 5px;">
             <div style="margin-bottom: 10px;">
                 <label>最小挂单量: <input type="number" id="min-order-vol" value="1000"></label>
-                <label style="margin-left:15px;">日总成交量: <input type="number" id="min-total-vol" value="0"> <span style="font-size: 0.9em; color: #888;">(前端过滤)</span></label>
+                <label style="margin-left:15px;">日总成交量: 
+                    <input type="number" id="min-total-vol" placeholder="最小" style="width: 80px;"> 
+                    - 
+                    <input type="number" id="max-total-vol" placeholder="最大" style="width: 80px;">
+                    <span style="font-size: 0.9em; color: #888;">(前端过滤)</span>
+                </label>
                 <label style="margin-left:15px;">监控时间窗口(分钟): <input type="number" id="time-window" value="60"></label>
                 <label style="margin-left:15px;">方向: 
                     <select id="side-filter">
@@ -125,10 +130,16 @@
 
                 // --- 前端过滤：日总成交量 ---
                 const minTotalVolStr = document.getElementById('min-total-vol').value;
-                const minTotalVol = minTotalVolStr !== '' ? Number(minTotalVolStr) : 0;
+                const maxTotalVolStr = document.getElementById('max-total-vol').value;
                 
-                if (minTotalVol > 0) {
-                    data = data.filter(row => Number(row.total_volume) >= minTotalVol);
+                if (minTotalVolStr !== '' || maxTotalVolStr !== '') {
+                    const minTotalVol = minTotalVolStr !== '' ? Number(minTotalVolStr) : 0;
+                    const maxTotalVol = maxTotalVolStr !== '' ? Number(maxTotalVolStr) : Infinity;
+                    
+                    data = data.filter(row => {
+                        const vol = Number(row.total_volume) || 0;
+                        return vol >= minTotalVol && vol <= maxTotalVol;
+                    });
                 }
 
                 // --- 前端过滤：最新价区间 ---
@@ -332,7 +343,7 @@
         }
 
         // 绑定事件
-        ['min-order-vol', 'min-total-vol', 'time-window', 'side-filter', 'min-price', 'max-price', 'sort-method', 'display-limit'].forEach(id => {
+        ['min-order-vol', 'min-total-vol', 'max-total-vol', 'time-window', 'side-filter', 'min-price', 'max-price', 'sort-method', 'display-limit'].forEach(id => {
             document.getElementById(id).addEventListener('change', () => {
                 fetchData();
                 // 重置定时器
