@@ -86,6 +86,8 @@
                 expandedSymbols.add(symbol);
             }
         }
+        
+        function buildUrl() {
             const minOrderVol = document.getElementById('min-order-vol').value || 0;
             const timeWindow = document.getElementById('time-window').value || 5;
             return `/api/large-orders-screener?min_order_volume=${minOrderVol}&time_window_mins=${timeWindow}`;
