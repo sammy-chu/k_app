@@ -601,6 +601,7 @@ app.get('/api/large-orders-screener', async (req, res) => {
   try {
     const minOrderVolume = Number(req.query.min_order_volume || 1000);
     const timeWindowMins = Number(req.query.time_window_mins || 5);
+    const safeEtfList = etfList.length > 0 ? etfList : ['__NO_ETF__'];
 
     const sql = `
       WITH recent_large_orders AS (
@@ -616,11 +617,12 @@ app.get('/api/large-orders-screener', async (req, res) => {
       FROM recent_large_orders o
       JOIN market_data.daily_summary d ON o.symbol = d.symbol
       WHERE d.trade_date = CURRENT_DATE
+        AND NOT (o.symbol = ANY($3::text[]))
       ORDER BY o.detected_at DESC
       LIMIT 100
     `;
 
-    const { rows } = await pool.query(sql, [timeWindowMins, minOrderVolume]);
+    const { rows } = await pool.query(sql, [timeWindowMins, minOrderVolume, safeEtfList]);
     
     // Inject latest price from memory cache (priceWindow)
     const result = rows.map(row => {
