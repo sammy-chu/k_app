@@ -69,6 +69,7 @@
                         <option value="20" selected>20只</option>
                         <option value="50">50只</option>
                         <option value="100">100只</option>
+                        <option value="all">显示全部</option>
                     </select>
                 </label>
                 <button id="btn-expand-all" style="margin-left:15px; padding: 3px 10px; cursor: pointer;">展开全部</button>
@@ -225,7 +226,8 @@
             }
 
             const currentSymbols = new Set();
-            const displayLimit = Number(document.getElementById('display-limit').value) || 20;
+            const displayLimitValue = document.getElementById('display-limit').value;
+            const displayLimit = displayLimitValue === 'all' ? data.length : (Number(displayLimitValue) || 20);
 
             // 正向遍历聚合后的数据，由于已经排序，可以直接按顺序操作 DOM
             data.slice(0, displayLimit).forEach((group, index) => {
