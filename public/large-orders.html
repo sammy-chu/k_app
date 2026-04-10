@@ -12,6 +12,18 @@
         .flash-up { background-color: rgba(38, 166, 154, 0.4) !important; }
         .flash-down { background-color: rgba(239, 83, 80, 0.4) !important; }
         .flash-new { background-color: rgba(255, 255, 255, 0.2) !important; }
+        
+        /* 嵌套表格样式 */
+        .parent-row { cursor: pointer; }
+        .parent-row:hover { background-color: #2a2a2a; }
+        .toggle-icon { display: inline-block; width: 20px; text-align: center; font-weight: bold; color: #888; }
+        .child-row { display: none; background-color: #111; }
+        .child-table { margin: 10px 0; border: 1px solid #555; background-color: #222; }
+        .child-table th { background-color: #2a2a2a; font-size: 0.9em; padding: 5px 10px; }
+        .child-table td { padding: 5px 10px; font-size: 0.9em; border-color: #333; }
+        .net-positive { color: #26a69a; font-weight: bold; }
+        .net-negative { color: #ef5350; font-weight: bold; }
+        .net-neutral { color: #888; }
     </style>
 </head>
 <body>
@@ -44,11 +56,11 @@
             <thead>
                 <tr>
                     <th>股票代码</th>
-                    <th>方向</th>
-                    <th>挂单价</th>
                     <th>最新价</th>
-                    <th>挂单量</th>
                     <th>日总成交量</th>
+                    <th>买盘大单总量</th>
+                    <th>卖盘大单总量</th>
+                    <th>净大单差额</th>
                 </tr>
             </thead>
             <tbody id="table-body">
@@ -58,9 +70,22 @@
     </div>
     <script>
         let fetchTimer;
-        let displayedOrders = []; // 前端状态队列，最多保留 20 条
+        let displayedStocks = []; // 前端状态队列，保存已渲染的 symbol
+        let expandedSymbols = new Set(); // 记录展开状态的 symbol
         
-        function buildUrl() {
+        function toggleDetails(symbol) {
+            const childRow = document.getElementById('child-row-' + symbol);
+            const icon = document.getElementById('toggle-icon-' + symbol);
+            if (childRow.style.display === 'table-row') {
+                childRow.style.display = 'none';
+                icon.innerText = '[+]';
+                expandedSymbols.delete(symbol);
+            } else {
+                childRow.style.display = 'table-row';
+                icon.innerText = '[-]';
+                expandedSymbols.add(symbol);
+            }
+        }
             const minOrderVol = document.getElementById('min-order-vol').value || 0;
             const timeWindow = document.getElementById('time-window').value || 5;
             return `/api/large-orders-screener?min_order_volume=${minOrderVol}&time_window_mins=${timeWindow}`;
@@ -107,90 +132,176 @@
             }
         }
 
-        function renderTable(data) {
+        function processData(rawData) {
+            const groups = {};
+            rawData.forEach(row => {
+                const sym = row.symbol;
+                if (!groups[sym]) {
+                    groups[sym] = {
+                        symbol: sym,
+                        current_price: Number(row.current_price),
+                        total_volume: Number(row.total_volume),
+                        latest_detected_at: row.detected_at,
+                        bid_vol: 0,
+                        ask_vol: 0,
+                        orders: []
+                    };
+                }
+                
+                // 更新最新异动时间
+                if (new Date(row.detected_at) > new Date(groups[sym].latest_detected_at)) {
+                    groups[sym].latest_detected_at = row.detected_at;
+                }
+                
+                const vol = Number(row.order_volume);
+                if (row.side === 'bid') groups[sym].bid_vol += vol;
+                if (row.side === 'ask') groups[sym].ask_vol += vol;
+                
+                groups[sym].orders.push(row);
+            });
+            
+            // 计算净量并排序（按最新异动时间降序）
+            const result = Object.values(groups).map(g => {
+                g.net_vol = g.bid_vol - g.ask_vol;
+                // 对子订单按时间降序
+                g.orders.sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
+                return g;
+            });
+            
+            result.sort((a, b) => new Date(b.latest_detected_at) - new Date(a.latest_detected_at));
+            return result;
+        }
+
+        function renderTable(rawData) {
+            const data = processData(rawData);
             const tbody = document.getElementById('table-body');
             
             // 处理清空数据的情况
-            if (data.length === 0 && displayedOrders.length === 0) {
+            if (data.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">暂无符合条件的大单数据</td></tr>';
+                displayedStocks = [];
                 return;
-            } else if (data.length > 0 && tbody.querySelector('td[colspan]')) {
-                tbody.innerHTML = ''; // 清除"加载中"或"暂无数据"提示
+            } else if (tbody.querySelector('td[colspan="6"]') && tbody.querySelector('td[colspan="6"]').innerText.includes('暂无')) {
+                tbody.innerHTML = ''; // 清除"暂无数据"提示
+            } else if (tbody.querySelector('td[colspan="6"]') && tbody.querySelector('td[colspan="6"]').innerText.includes('加载中')) {
+                tbody.innerHTML = ''; // 清除"加载中"提示
             }
 
-            // 反向遍历新数据，这样 unshift 才能保持最新的在最上面
-            for (let i = data.length - 1; i >= 0; i--) {
-                const row = data[i];
-                const orderKey = row.symbol + '-' + row.side;
+            const currentSymbols = new Set();
+
+            // 正向遍历聚合后的数据，由于已经按最新时间排序，可以直接按顺序操作 DOM
+            data.slice(0, 20).forEach((group, index) => {
+                const sym = group.symbol;
+                currentSymbols.add(sym);
                 
-                // 在现有队列中查找
-                const existingIndex = displayedOrders.findIndex(item => item.symbol + '-' + item.side === orderKey);
+                const netClass = group.net_vol > 0 ? 'net-positive' : (group.net_vol < 0 ? 'net-negative' : 'net-neutral');
+                const netPrefix = group.net_vol > 0 ? '+' : '';
                 
-                if (existingIndex > -1) {
+                let parentTr = document.getElementById('parent-row-' + sym);
+                let childTr = document.getElementById('child-row-' + sym);
+                
+                // 子表格 HTML
+                let childTableHtml = `<table class="child-table">
+                    <thead><tr><th>方向</th><th>档位</th><th>挂单价</th><th>挂单量</th><th>发现时间</th></tr></thead><tbody>`;
+                group.orders.forEach(o => {
+                    const sideColor = o.side === 'bid' ? '#26a69a' : '#ef5350';
+                    const sideText = o.side === 'bid' ? '买盘' : '卖盘';
+                    const timeStr = new Date(o.detected_at).toLocaleTimeString();
+                    childTableHtml += `<tr>
+                        <td style="color:${sideColor};">${sideText}</td>
+                        <td>L${o.level}</td>
+                        <td>${Number(o.order_price).toFixed(2)}</td>
+                        <td>${o.order_volume}</td>
+                        <td style="color:#888;">${timeStr}</td>
+                    </tr>`;
+                });
+                childTableHtml += `</tbody></table>`;
+
+                if (parentTr) {
                     // 已存在，擦写式更新
-                    const existingData = displayedOrders[existingIndex];
-                    const tr = document.getElementById('row-' + orderKey);
-                    if (tr) {
-                        // 更新最新价
-                        if (Number(existingData.current_price) !== Number(row.current_price)) {
-                            const priceTd = tr.querySelector('.td-price');
-                            const oldPrice = Number(existingData.current_price);
-                            const newPrice = Number(row.current_price);
-                            priceTd.innerText = newPrice.toFixed(2);
-                            
-                            // 闪烁效果
-                            const flashClass = newPrice > oldPrice ? 'flash-up' : 'flash-down';
-                            priceTd.classList.add(flashClass);
-                            setTimeout(() => priceTd.classList.remove(flashClass), 500);
-                        }
-                        
-                        // 更新成交量
-                        if (Number(existingData.total_volume) !== Number(row.total_volume)) {
-                            const volTd = tr.querySelector('.td-vol');
-                            volTd.innerText = row.total_volume;
-                        }
-                        
-                        // 更新挂单价/挂单量
-                        tr.querySelector('.td-order-price').innerText = Number(row.order_price).toFixed(2);
-                        tr.querySelector('.td-order-vol').innerText = row.order_volume;
+                    const existingPrice = Number(parentTr.dataset.price);
+                    const newPrice = group.current_price;
+                    
+                    if (existingPrice !== newPrice) {
+                        const priceTd = parentTr.querySelector('.td-price');
+                        priceTd.innerText = newPrice.toFixed(2);
+                        const flashClass = newPrice > existingPrice ? 'flash-up' : 'flash-down';
+                        priceTd.classList.add(flashClass);
+                        setTimeout(() => priceTd.classList.remove(flashClass), 500);
+                        parentTr.dataset.price = newPrice;
                     }
                     
-                    // 更新内部数据状态
-                    displayedOrders[existingIndex] = row;
+                    parentTr.querySelector('.td-vol').innerText = group.total_volume;
+                    parentTr.querySelector('.td-bid').innerText = group.bid_vol;
+                    parentTr.querySelector('.td-ask').innerText = group.ask_vol;
+                    
+                    const netTd = parentTr.querySelector('.td-net');
+                    netTd.className = `td-net ${netClass}`;
+                    netTd.innerText = netPrefix + group.net_vol;
+
+                    // 更新子表内容
+                    childTr.querySelector('td').innerHTML = childTableHtml;
+                    
+                    // 调整 DOM 顺序（确保最新的异动能顶上去）
+                    const targetRowIndex = index * 2; // parent + child 占两行
+                    if (Array.from(tbody.children).indexOf(parentTr) !== targetRowIndex) {
+                        tbody.insertBefore(parentTr, tbody.children[targetRowIndex] || null);
+                        tbody.insertBefore(childTr, tbody.children[targetRowIndex + 1] || null);
+                    }
+                    
                 } else {
-                    // 新数据，插入到头部
-                    displayedOrders.unshift(row);
+                    // 新数据，插入
+                    parentTr = document.createElement('tr');
+                    parentTr.id = 'parent-row-' + sym;
+                    parentTr.className = 'parent-row';
+                    parentTr.dataset.price = group.current_price;
+                    parentTr.onclick = () => toggleDetails(sym);
                     
-                    const sideColor = row.side === 'bid' ? '#26a69a' : '#ef5350';
-                    const sideText = row.side === 'bid' ? '买盘' : '卖盘';
+                    const icon = expandedSymbols.has(sym) ? '[-]' : '[+]';
                     
-                    const tr = document.createElement('tr');
-                    tr.id = 'row-' + orderKey;
-                    tr.innerHTML = `
-                        <td style="font-weight:bold;">${row.symbol}</td>
-                        <td style="color:${sideColor};">${sideText} (L${row.level})</td>
-                        <td class="td-order-price">${Number(row.order_price).toFixed(2)}</td>
-                        <td class="td-price">${Number(row.current_price).toFixed(2)}</td>
-                        <td class="td-order-vol">${row.order_volume}</td>
-                        <td class="td-vol">${row.total_volume}</td>
+                    parentTr.innerHTML = `
+                        <td style="font-weight:bold;">
+                            <span class="toggle-icon" id="toggle-icon-${sym}">${icon}</span> ${sym}
+                        </td>
+                        <td class="td-price">${group.current_price.toFixed(2)}</td>
+                        <td class="td-vol">${group.total_volume}</td>
+                        <td class="td-bid" style="color:#26a69a;">${group.bid_vol}</td>
+                        <td class="td-ask" style="color:#ef5350;">${group.ask_vol}</td>
+                        <td class="td-net ${netClass}">${netPrefix}${group.net_vol}</td>
                     `;
                     
-                    // 新行闪烁效果
-                    tr.classList.add('flash-new');
-                    setTimeout(() => tr.classList.remove('flash-new'), 500);
+                    childTr = document.createElement('tr');
+                    childTr.id = 'child-row-' + sym;
+                    childTr.className = 'child-row';
+                    childTr.style.display = expandedSymbols.has(sym) ? 'table-row' : 'none';
+                    childTr.innerHTML = `<td colspan="6">${childTableHtml}</td>`;
                     
-                    tbody.insertBefore(tr, tbody.firstChild);
+                    parentTr.classList.add('flash-new');
+                    setTimeout(() => parentTr.classList.remove('flash-new'), 500);
+                    
+                    // 插入到指定位置
+                    const targetRowIndex = index * 2;
+                    if (tbody.children[targetRowIndex]) {
+                        tbody.insertBefore(parentTr, tbody.children[targetRowIndex]);
+                        tbody.insertBefore(childTr, tbody.children[targetRowIndex + 1]);
+                    } else {
+                        tbody.appendChild(parentTr);
+                        tbody.appendChild(childTr);
+                    }
                 }
-            }
+            });
 
-            // 保持最多 20 条，溢出的从 DOM 和数组中移除
-            while (displayedOrders.length > 20) {
-                const removedItem = displayedOrders.pop();
-                const trToRemove = document.getElementById('row-' + removedItem.symbol + '-' + removedItem.side);
-                if (trToRemove) {
-                    trToRemove.remove();
+            // 清理已经跌出前 20 或者不再满足过滤条件的 DOM
+            displayedStocks.forEach(sym => {
+                if (!currentSymbols.has(sym)) {
+                    const p = document.getElementById('parent-row-' + sym);
+                    const c = document.getElementById('child-row-' + sym);
+                    if (p) p.remove();
+                    if (c) c.remove();
                 }
-            }
+            });
+            
+            displayedStocks = Array.from(currentSymbols);
         }
 
         // 绑定事件
