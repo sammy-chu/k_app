@@ -1001,14 +1001,15 @@ async function updateDailySummary() {
       SELECT
         symbol,
         (received_at AT TIME ZONE 'Asia/Shanghai')::date,
-        (array_agg(price::numeric ORDER BY received_at ASC))[1],
-        (array_agg(price::numeric ORDER BY received_at DESC))[1],
+        (array_agg(price::numeric ORDER BY market_time ASC))[1],
+        (array_agg(price::numeric ORDER BY market_time DESC))[1],
         MAX(price::numeric),
         MIN(price::numeric),
         SUM(size::numeric)
       FROM tos_trades
       WHERE received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
         AND price IS NOT NULL AND price::numeric > 0
+        AND market_time IS NOT NULL AND market_time != ''
         AND (
           CASE
             WHEN (now() AT TIME ZONE 'Asia/Shanghai')::time < '12:00:00'::time THEN market_time::time < '12:00:00'::time
@@ -1174,7 +1175,10 @@ const HILL_SCAN_INTERVAL = Number(process.env.HILL_SCAN_INTERVAL || 60000); // 1
 async function scanAndInsertHillAlerts() {
   try {
     const result = await getFlexibleHills(pool);
-    if (!result || !result.data || result.data.length === 0) return;
+    if (!result || !result.data || result.data.length === 0) {
+      console.log(`[HillMonitor] No hills detected (date: ${result ? result.date : 'unknown'}, count: ${result ? result.count : 0})`);
+      return;
+    }
 
     const insertSql = `
       INSERT INTO k_hill_alerts(symbol, bucket_time, volume, baseline_volume, breakout_ratio, hill_data)
