@@ -51,6 +51,24 @@
                 </label>
                 <span style="font-size: 0.9em; color: #888; margin-left: 10px;">(前端过滤)</span>
             </div>
+            <div style="margin-bottom: 5px; border-top: 1px solid #444; padding-top: 10px;">
+                <label>排序方式: 
+                    <select id="sort-method">
+                        <option value="time">按异动时间降序</option>
+                        <option value="symbol">按股票代码 A-Z</option>
+                    </select>
+                </label>
+                <label style="margin-left:15px;">显示数量: 
+                    <select id="display-limit">
+                        <option value="10">10只</option>
+                        <option value="20" selected>20只</option>
+                        <option value="50">50只</option>
+                        <option value="100">100只</option>
+                    </select>
+                </label>
+                <button id="btn-expand-all" style="margin-left:15px; padding: 3px 10px; cursor: pointer;">展开全部</button>
+                <button id="btn-collapse-all" style="margin-left:5px; padding: 3px 10px; cursor: pointer;">收起全部</button>
+            </div>
         </div>
         <table>
             <thead>
@@ -170,7 +188,13 @@
                 return g;
             });
             
-            result.sort((a, b) => new Date(b.latest_detected_at) - new Date(a.latest_detected_at));
+            const sortMethod = document.getElementById('sort-method').value;
+            if (sortMethod === 'time') {
+                result.sort((a, b) => new Date(b.latest_detected_at) - new Date(a.latest_detected_at));
+            } else if (sortMethod === 'symbol') {
+                result.sort((a, b) => a.symbol.localeCompare(b.symbol));
+            }
+            
             return result;
         }
 
@@ -190,9 +214,10 @@
             }
 
             const currentSymbols = new Set();
+            const displayLimit = Number(document.getElementById('display-limit').value) || 20;
 
-            // 正向遍历聚合后的数据，由于已经按最新时间排序，可以直接按顺序操作 DOM
-            data.slice(0, 20).forEach((group, index) => {
+            // 正向遍历聚合后的数据，由于已经排序，可以直接按顺序操作 DOM
+            data.slice(0, displayLimit).forEach((group, index) => {
                 const sym = group.symbol;
                 currentSymbols.add(sym);
                 
@@ -307,12 +332,34 @@
         }
 
         // 绑定事件
-        ['min-order-vol', 'min-total-vol', 'time-window', 'side-filter', 'min-price', 'max-price'].forEach(id => {
+        ['min-order-vol', 'min-total-vol', 'time-window', 'side-filter', 'min-price', 'max-price', 'sort-method', 'display-limit'].forEach(id => {
             document.getElementById(id).addEventListener('change', () => {
                 fetchData();
                 // 重置定时器
                 clearInterval(fetchTimer);
                 fetchTimer = setInterval(fetchData, 1000);
+            });
+        });
+
+        // 展开全部
+        document.getElementById('btn-expand-all').addEventListener('click', () => {
+            displayedStocks.forEach(sym => {
+                expandedSymbols.add(sym);
+                const childRow = document.getElementById('child-row-' + sym);
+                const icon = document.getElementById('toggle-icon-' + sym);
+                if (childRow) childRow.style.display = 'table-row';
+                if (icon) icon.innerText = '[-]';
+            });
+        });
+
+        // 收起全部
+        document.getElementById('btn-collapse-all').addEventListener('click', () => {
+            displayedStocks.forEach(sym => {
+                expandedSymbols.delete(sym);
+                const childRow = document.getElementById('child-row-' + sym);
+                const icon = document.getElementById('toggle-icon-' + sym);
+                if (childRow) childRow.style.display = 'none';
+                if (icon) icon.innerText = '[+]';
             });
         });
 
