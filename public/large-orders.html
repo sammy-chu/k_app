@@ -128,7 +128,7 @@
                 renderTable(data);
             } catch (err) {
                 console.error('Fetch error:', err);
-                document.getElementById('table-body').innerHTML = `<tr><td colspan="7" style="color:red;">加载失败: ${err.message}</td></tr>`;
+                document.getElementById('table-body').innerHTML = `<tr><td colspan="6" style="color:red;">加载失败: ${err.message}</td></tr>`;
             }
         }
 
@@ -139,8 +139,8 @@
                 if (!groups[sym]) {
                     groups[sym] = {
                         symbol: sym,
-                        current_price: Number(row.current_price),
-                        total_volume: Number(row.total_volume),
+                        current_price: Number(row.current_price) || 0,
+                        total_volume: Number(row.total_volume) || 0,
                         latest_detected_at: row.detected_at,
                         bid_vol: 0,
                         ask_vol: 0,
@@ -153,7 +153,7 @@
                     groups[sym].latest_detected_at = row.detected_at;
                 }
                 
-                const vol = Number(row.order_volume);
+                const vol = Number(row.order_volume) || 0;
                 if (row.side === 'bid') groups[sym].bid_vol += vol;
                 if (row.side === 'ask') groups[sym].ask_vol += vol;
                 
