@@ -37,6 +37,11 @@ pool.on('connect', (client) => {
   client.query('SET search_path TO ' + pgSchema);
 });
 
+// Handle idle client errors so they don't crash the node process
+pool.on('error', (err, client) => {
+  console.error('Unexpected error on idle client', err.message);
+});
+
 // Initialize ConfigManager
 const config = new ConfigManager(pool);
 
