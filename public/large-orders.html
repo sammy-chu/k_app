@@ -24,6 +24,16 @@
         .net-positive { color: #26a69a; font-weight: bold; }
         .net-negative { color: #ef5350; font-weight: bold; }
         .net-neutral { color: #888; }
+
+        /* 高频异动样式：1分钟内多次刷出 */
+        .hot-stock-row {
+            background-color: rgba(255, 152, 0, 0.15) !important;
+            border-left: 4px solid #ff9800 !important;
+        }
+        .hot-stock-symbol {
+            color: #ffeb3b !important;
+            text-shadow: 0 0 5px rgba(255, 235, 59, 0.4);
+        }
     </style>
 </head>
 <body>
@@ -166,6 +176,9 @@
 
         function processData(rawData) {
             const groups = {};
+            const now = new Date();
+            const oneMinAgo = new Date(now.getTime() - 60 * 1000);
+            
             rawData.forEach(row => {
                 const sym = row.symbol;
                 if (!groups[sym]) {
@@ -176,10 +189,16 @@
                         latest_detected_at: row.detected_at,
                         bid_vol: 0,
                         ask_vol: 0,
-                        orders: []
+                        orders: [],
+                        recentCount: 0 // 1分钟内频次
                     };
                 }
                 
+                // 统计1分钟内频次
+                if (new Date(row.detected_at) >= oneMinAgo) {
+                    groups[sym].recentCount++;
+                }
+
                 // 更新最新异动时间
                 if (new Date(row.detected_at) > new Date(groups[sym].latest_detected_at)) {
                     groups[sym].latest_detected_at = row.detected_at;
@@ -195,6 +214,7 @@
             // 计算净量并排序（按最新异动时间降序）
             const result = Object.values(groups).map(g => {
                 g.net_vol = g.bid_vol - g.ask_vol;
+                g.isHot = g.recentCount > 1; // 1分钟内出现超过1次即为热点
                 // 对子订单按时间降序
                 g.orders.sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
                 return g;
@@ -236,6 +256,8 @@
                 
                 const netClass = group.net_vol > 0 ? 'net-positive' : (group.net_vol < 0 ? 'net-negative' : 'net-neutral');
                 const netPrefix = group.net_vol > 0 ? '+' : '';
+                const hotClass = group.isHot ? 'hot-stock-row' : '';
+                const symbolHotClass = group.isHot ? 'hot-stock-symbol' : '';
                 
                 let parentTr = document.getElementById('parent-row-' + sym);
                 let childTr = document.getElementById('child-row-' + sym);
@@ -259,6 +281,10 @@
 
                 if (parentTr) {
                     // 已存在，擦写式更新
+                    parentTr.className = 'parent-row ' + hotClass;
+                    const symSpan = parentTr.querySelector('.sym-text');
+                    if (symSpan) symSpan.className = 'sym-text ' + symbolHotClass;
+                    
                     const existingPrice = Number(parentTr.dataset.price);
                     const newPrice = group.current_price;
                     
@@ -293,7 +319,7 @@
                     // 新数据，插入
                     parentTr = document.createElement('tr');
                     parentTr.id = 'parent-row-' + sym;
-                    parentTr.className = 'parent-row';
+                    parentTr.className = 'parent-row ' + hotClass;
                     parentTr.dataset.price = group.current_price;
                     parentTr.onclick = () => toggleDetails(sym);
                     
@@ -301,7 +327,8 @@
                     
                     parentTr.innerHTML = `
                         <td style="font-weight:bold;">
-                            <span class="toggle-icon" id="toggle-icon-${sym}">${icon}</span> ${sym}
+                            <span class="toggle-icon" id="toggle-icon-${sym}">${icon}</span> 
+                            <span class="sym-text ${symbolHotClass}">${sym}</span>
                         </td>
                         <td class="td-price">${group.current_price.toFixed(2)}</td>
                         <td class="td-vol">${group.total_volume}</td>
