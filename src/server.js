@@ -603,10 +603,14 @@ app.get('/api/ranking', (req, res) => {
 
 // === 大单监控筛选器 API ===
 app.get('/api/large-orders-screener', async (req, res) => {
+  const client = await pool.connect();
   try {
     const minOrderVolume = Number(req.query.min_order_volume || 1000);
     const timeWindowMins = Number(req.query.time_window_mins || 5);
     const safeEtfList = etfList.length > 0 ? etfList : ['__NO_ETF__'];
+
+    // 设置 API 请求的专属超时 (60秒)
+    await client.query('SET statement_timeout = 60000');
 
     const sql = `
       WITH recent_large_orders AS (
@@ -627,7 +631,7 @@ app.get('/api/large-orders-screener', async (req, res) => {
       LIMIT 100
     `;
 
-    const { rows } = await pool.query(sql, [timeWindowMins, minOrderVolume, safeEtfList]);
+    const { rows } = await client.query(sql, [timeWindowMins, minOrderVolume, safeEtfList]);
     
     // Inject latest price from memory cache (priceWindow)
     const result = rows.map(row => {
@@ -642,8 +646,11 @@ app.get('/api/large-orders-screener', async (req, res) => {
 
     res.json(result);
   } catch (e) {
-    console.error('Large orders screener error:', e);
-    res.status(500).json({ error: 'Internal Server Error' });
+    console.error('Large orders screener error:', e.message);
+    res.status(500).json({ error: 'Internal Server Error', message: e.message });
+  } finally {
+    await client.query('SET statement_timeout = 0').catch(() => {});
+    client.release();
   }
 });
 
@@ -1037,6 +1044,7 @@ async function updateDailySummary() {
   } catch (err) {
     console.error('[DailySummary] Update failed:', err.message);
   } finally {
+    await client.query('SET statement_timeout = 0').catch(() => {});
     client.release();
   }
 }
@@ -1044,136 +1052,142 @@ async function updateDailySummary() {
 async function scanAllVolumeAlerts() {
   await ensureVolumeAlertSchema();
 
-  // Load dynamic configuration
-  const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
-  console.log(`[VolumeMonitor] Running scan with history=${VOLUME_HISTORY_DAYS}d`);
-  
-  // Load time checkpoints
-  let timeCheckpoints = await config.get('time_checkpoints', []);
-  if (!Array.isArray(timeCheckpoints)) {
-      console.warn('[VolumeMonitor] time_checkpoints is not an array, using defaults');
-      timeCheckpoints = [
-        { elapsed_minutes: 120, expected_pct: 0.30, label: "开市2小时" }, 
-        { elapsed_minutes: 180, expected_pct: 0.50, label: "开市3小时" }, 
-        { elapsed_minutes: 240, expected_pct: 0.75, label: "收盘前" }
-      ];
-  }
+  const client = await pool.connect();
+  try {
+    // 为这个重型全市场扫描任务设置 3 分钟超时
+    await client.query('SET statement_timeout = 180000');
 
-  const today = new Date().toISOString().split('T')[0];
-  const scanTs = new Date().toISOString();
+    // Load dynamic configuration
+    const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
+    console.log(`[VolumeMonitor] Running scan with history=${VOLUME_HISTORY_DAYS}d`);
+    
+    // Load time checkpoints
+    let timeCheckpoints = await config.get('time_checkpoints', []);
+    if (!Array.isArray(timeCheckpoints)) {
+        console.warn('[VolumeMonitor] time_checkpoints is not an array, using defaults');
+        timeCheckpoints = [
+          { elapsed_minutes: 120, expected_pct: 0.30, label: "开市2小时" }, 
+          { elapsed_minutes: 180, expected_pct: 0.50, label: "开市3小时" }, 
+          { elapsed_minutes: 240, expected_pct: 0.75, label: "收盘前" }
+        ];
+    }
 
-  // 1. 刷新今日 tos_daily_volume（使用 received_at 走索引，增量累加）
-  if (!lastVolumeScanAt) {
-    // 首次运行：全量刷新
-    await pool.query(`
-      INSERT INTO tos_daily_volume(symbol, trade_date, daily_volume, updated_at)
-      SELECT symbol, DATE(received_at), SUM(size), now()
-      FROM tos_trades
-      WHERE received_at >= $1::date AND received_at < ($1::date + INTERVAL '1 day')
-      GROUP BY symbol, DATE(received_at)
-      ON CONFLICT (symbol, trade_date)
-      DO UPDATE SET daily_volume = EXCLUDED.daily_volume, updated_at = now()
-    `, [today]);
-    console.log('[VolumeMonitor] Full refresh');
-  } else {
-    // 增量：只累加上次扫描之后的新数据
-    await pool.query(`
-      INSERT INTO tos_daily_volume(symbol, trade_date, daily_volume, updated_at)
-      SELECT symbol, DATE(received_at), SUM(size), now()
-      FROM tos_trades
-      WHERE received_at > $1::timestamptz
-        AND received_at < $2::timestamptz
-        AND DATE(received_at) = $3::date
-      GROUP BY symbol, DATE(received_at)
-      ON CONFLICT (symbol, trade_date)
-      DO UPDATE SET daily_volume = tos_daily_volume.daily_volume + EXCLUDED.daily_volume,
-                    updated_at = now()
-    `, [lastVolumeScanAt, scanTs, today]);
-  }
-  lastVolumeScanAt = scanTs;
+    const today = new Date().toISOString().split('T')[0];
+    const scanTs = new Date().toISOString();
 
-  // 2. Calculate elapsed minutes (Beijing Time 08:00 - 16:00)
-  const now = new Date();
-  const nowBeijing = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
-  
-  // Weekend check (Saturday/Sunday Beijing Time)
-  const day = nowBeijing.getDay();
-  // if (day === 0 || day === 6) {
-  //   console.log('[VolumeMonitor] Weekend (Saturday/Sunday), skipping scan');
-  //   return;
-  // }
-  if (day === 0 || day === 6) {
-    console.log('[VolumeMonitor] Weekend detected but continuing for testing/verification purposes.');
-  }
+    // 1. 刷新今日 tos_daily_volume（使用 received_at 走索引，增量累加）
+    if (!lastVolumeScanAt) {
+      // 首次运行：全量刷新
+      await client.query(`
+        INSERT INTO tos_daily_volume(symbol, trade_date, daily_volume, updated_at)
+        SELECT symbol, DATE(received_at), SUM(size), now()
+        FROM tos_trades
+        WHERE received_at >= $1::date AND received_at < ($1::date + INTERVAL '1 day')
+        GROUP BY symbol, DATE(received_at)
+        ON CONFLICT (symbol, trade_date)
+        DO UPDATE SET daily_volume = EXCLUDED.daily_volume, updated_at = now()
+      `, [today]);
+      console.log('[VolumeMonitor] Full refresh');
+    } else {
+      // 增量：只累加上次扫描之后的新数据
+      await client.query(`
+        INSERT INTO tos_daily_volume(symbol, trade_date, daily_volume, updated_at)
+        SELECT symbol, DATE(received_at), SUM(size), now()
+        FROM tos_trades
+        WHERE received_at > $1::timestamptz
+          AND received_at < $2::timestamptz
+          AND DATE(received_at) = $3::date
+        GROUP BY symbol, DATE(received_at)
+        ON CONFLICT (symbol, trade_date)
+        DO UPDATE SET daily_volume = tos_daily_volume.daily_volume + EXCLUDED.daily_volume,
+                      updated_at = now()
+      `, [lastVolumeScanAt, scanTs, today]);
+    }
+    lastVolumeScanAt = scanTs;
 
-  const currentMins = nowBeijing.getHours() * 60 + nowBeijing.getMinutes();
-  const elapsedMinutes = currentMins - MARKET_OPEN_MINS; 
+    // 2. Calculate elapsed minutes (Beijing Time 08:00 - 16:00)
+    const now = new Date();
+    const nowBeijing = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+    
+    const day = nowBeijing.getDay();
+    if (day === 0 || day === 6) {
+      console.log('[VolumeMonitor] Weekend detected but continuing for testing/verification purposes.');
+    }
 
-  console.log(`[VolumeMonitor] Beijing Time: ${nowBeijing.toLocaleTimeString()}, elapsedMinutes=${elapsedMinutes}`);
-  if (elapsedMinutes <= 0) return; // Pre-market, skip
+    const currentMins = nowBeijing.getHours() * 60 + nowBeijing.getMinutes();
+    const elapsedMinutes = currentMins - MARKET_OPEN_MINS; 
 
-  // 3. Checkpoints Logic
-  let totalTriggered = 0;
-  
-  for (const cp of timeCheckpoints) {
-      // Check if time window reached
-      if (elapsedMinutes < cp.elapsed_minutes) continue;
+    console.log(`[VolumeMonitor] Beijing Time: ${nowBeijing.toLocaleTimeString()}, elapsedMinutes=${elapsedMinutes}`);
+    if (elapsedMinutes <= 0) return; // Pre-market, skip
 
-      // Construct rule_id
-      const ruleId = `checkpoint_${cp.elapsed_minutes}min_${Math.round(cp.expected_pct*100)}pct`;
+    // 3. Checkpoints Logic
+    let totalTriggered = 0;
+    
+    for (const cp of timeCheckpoints) {
+        // Check if time window reached
+        if (elapsedMinutes < cp.elapsed_minutes) continue;
 
-      const sql = `
-        WITH hist_ranked AS (
-          SELECT symbol,
-                 daily_volume,
-                 PERCENT_RANK() OVER (PARTITION BY symbol ORDER BY daily_volume) AS pct_rank,
-                 COUNT(*) OVER (PARTITION BY symbol) AS total_days
-          FROM tos_daily_volume
-          WHERE trade_date >= ($1::date - $2 * INTERVAL '1 day')
-            AND trade_date < $1::date
-        ),
-        hist AS (
+        // Construct rule_id
+        const ruleId = `checkpoint_${cp.elapsed_minutes}min_${Math.round(cp.expected_pct*100)}pct`;
+
+        const sql = `
+          WITH hist_ranked AS (
             SELECT symbol,
-                   AVG(daily_volume) AS avg_vol
-            FROM hist_ranked
-            WHERE total_days >= 1
-              AND pct_rank >= 0.1 AND pct_rank <= 0.9
-            GROUP BY symbol
+                   daily_volume,
+                   PERCENT_RANK() OVER (PARTITION BY symbol ORDER BY daily_volume) AS pct_rank,
+                   COUNT(*) OVER (PARTITION BY symbol) AS total_days
+            FROM tos_daily_volume
+            WHERE trade_date >= ($1::date - $2 * INTERVAL '1 day')
+              AND trade_date < $1::date
           ),
-        today_vol AS (
-          SELECT symbol, daily_volume AS cum_vol
-          FROM tos_daily_volume
-          WHERE trade_date = $1::date
-        )
-        INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol, rule_id, created_at)
-        SELECT t.symbol,
-               $1::date::timestamp AS bucket,
-               t.cum_vol / NULLIF(h.avg_vol, 0) AS volume_ratio,
-               t.cum_vol,
-               ROUND(h.avg_vol, 2),
-               $3, -- rule_id
-               now()
-        FROM today_vol t
-        JOIN hist h USING (symbol)
-        WHERE h.avg_vol > 0
-          AND (t.cum_vol / NULLIF(h.avg_vol, 0)) >= $4::numeric
-        ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
-        RETURNING symbol;
-      `;
+          hist AS (
+              SELECT symbol,
+                     AVG(daily_volume) AS avg_vol
+              FROM hist_ranked
+              WHERE total_days >= 1
+                AND pct_rank >= 0.1 AND pct_rank <= 0.9
+              GROUP BY symbol
+            ),
+          today_vol AS (
+            SELECT symbol, daily_volume AS cum_vol
+            FROM tos_daily_volume
+            WHERE trade_date = $1::date
+          )
+          INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol, rule_id, created_at)
+          SELECT t.symbol,
+                 $1::date::timestamp AS bucket,
+                 t.cum_vol / NULLIF(h.avg_vol, 0) AS volume_ratio,
+                 t.cum_vol,
+                 ROUND(h.avg_vol, 2),
+                 $3, -- rule_id
+                 now()
+          FROM today_vol t
+          JOIN hist h USING (symbol)
+          WHERE h.avg_vol > 0
+            AND (t.cum_vol / NULLIF(h.avg_vol, 0)) >= $4::numeric
+          ON CONFLICT (symbol, bucket, rule_id) DO NOTHING
+          RETURNING symbol;
+        `;
 
-      try {
-          const res = await pool.query(sql, [today, VOLUME_HISTORY_DAYS, ruleId, cp.expected_pct]);
-          totalTriggered += res.rowCount;
-          if (res.rowCount > 0) {
-              console.log(`[VolumeMonitor] Checkpoint ${cp.label} (${ruleId}) triggered for ${res.rowCount} symbols`);
-          }
-      } catch (err) {
-          console.error(`[VolumeMonitor] Error checking checkpoint ${cp.label}:`, err);
-      }
-  }
-  
-  if (totalTriggered > 0) {
-      console.log(`[VolumeMonitor] Total alerts triggered: ${totalTriggered}`);
+        try {
+            const res = await client.query(sql, [today, VOLUME_HISTORY_DAYS, ruleId, cp.expected_pct]);
+            totalTriggered += res.rowCount;
+            if (res.rowCount > 0) {
+                console.log(`[VolumeMonitor] Checkpoint ${cp.label} (${ruleId}) triggered for ${res.rowCount} symbols`);
+            }
+        } catch (err) {
+            console.error(`[VolumeMonitor] Error checking checkpoint ${cp.label}:`, err.message);
+        }
+    }
+    
+    if (totalTriggered > 0) {
+        console.log(`[VolumeMonitor] Total alerts triggered: ${totalTriggered}`);
+    }
+  } catch (err) {
+    console.error('[VolumeMonitor] Scan failed:', err.message);
+  } finally {
+    await client.query('SET statement_timeout = 0').catch(() => {});
+    client.release();
   }
 }
 
