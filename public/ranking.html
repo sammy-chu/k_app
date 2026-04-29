@@ -186,6 +186,14 @@
             width: 80px;
         }
 
+        .warning-up {
+            background-color: rgba(38, 166, 154, 0.2) !important;
+        }
+        
+        .warning-down {
+            background-color: rgba(239, 83, 80, 0.2) !important;
+        }
+
         @media (max-width: 768px) {
             .header-bar {
                 flex-direction: column;
@@ -239,6 +247,7 @@
 
     <script>
         let currentData = [];
+        let symbolStates = {}; // Track price history and warning states
         let sortColumn = 'change_amount'; // default sort column
         let sortDirection = 'desc'; // 'asc' or 'desc'
         let timer = null;
@@ -265,6 +274,71 @@
 
         let isFetching = false;
 
+        function processWarnings(data) {
+            const now = Date.now();
+            data.forEach(item => {
+                const currentPrice = Number(item.last_price);
+                if (isNaN(currentPrice)) return;
+
+                let state = symbolStates[item.symbol];
+                if (!state) {
+                    state = { history: [], warning: { active: false } };
+                    symbolStates[item.symbol] = state;
+                }
+
+                // Add current price to history
+                state.history.push({ t: now, p: currentPrice });
+                
+                // Keep only last 60 seconds of history
+                state.history = state.history.filter(h => now - h.t <= 60000);
+
+                if (state.history.length > 0) {
+                    // Compare with the oldest price in our 60s window
+                    const oldestPrice = state.history[0].p;
+                    const change1m = currentPrice - oldestPrice;
+                    const absChange = Math.abs(change1m);
+
+                    if (state.warning.active) {
+                        if (now > state.warning.endTime) {
+                            // Expired
+                            if (absChange > 1) {
+                                // Re-trigger if still > 1
+                                state.warning = {
+                                    active: true,
+                                    startTime: now,
+                                    endTime: now + 5 * 60 * 1000,
+                                    maxChange: absChange,
+                                    direction: change1m > 0 ? 'up' : 'down'
+                                };
+                            } else {
+                                state.warning.active = false;
+                            }
+                        } else {
+                            // Active warning: check if change continues to increase
+                            if (absChange > state.warning.maxChange) {
+                                state.warning.maxChange = absChange;
+                                const maxEndTime = state.warning.startTime + 30 * 60 * 1000;
+                                let newEndTime = now + 5 * 60 * 1000;
+                                state.warning.endTime = Math.min(newEndTime, maxEndTime);
+                                state.warning.direction = change1m > 0 ? 'up' : 'down';
+                            }
+                        }
+                    } else {
+                        // Not active: check if triggered
+                        if (absChange > 1) {
+                            state.warning = {
+                                active: true,
+                                startTime: now,
+                                endTime: now + 5 * 60 * 1000,
+                                maxChange: absChange,
+                                direction: change1m > 0 ? 'up' : 'down'
+                            };
+                        }
+                    }
+                }
+            });
+        }
+
         async function fetchData() {
             if (isFetching) return;
             isFetching = true;
@@ -275,6 +349,7 @@
                 const res = await fetch(`/api/ranking?min_volume=${minVol}&min_price_change_3m=${min3mChange}`);
                 if (!res.ok) throw new Error('Network response was not ok');
                 currentData = await res.json();
+                processWarnings(currentData);
                 renderTable();
                 resetTimer();
             } catch (err) {
@@ -358,8 +433,14 @@
                 const change3mClass = Number(item.price_change_3m) > 0 ? 'up' : (Number(item.price_change_3m) < 0 ? 'down' : 'flat');
                 const volumeRatio = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-';
                 
+                const state = symbolStates[item.symbol];
+                let rowClass = '';
+                if (state && state.warning && state.warning.active) {
+                    rowClass = state.warning.direction === 'up' ? 'warning-up' : 'warning-down';
+                }
+                
                 html += `
-                    <tr>
+                    <tr class="${rowClass}">
                         <td>${index + 1}</td>
                         <td class="symbol">${item.symbol}</td>
                         <td class="${changeClass}">${formatNumber(item.last_price)}</td>
