@@ -286,6 +286,22 @@
         let debounceTimer = null;
         let viewMode = 'dual'; // 'dual' | 'full' 
 
+        // 双列各自的排序状态 
+        let dualSort = { 
+            up:   { col: 'change_pct', dir: 'desc' }, 
+            down: { col: 'change_pct', dir: 'desc' } 
+        }; 
+        
+        function handleDualSort(side, col) { 
+            if (dualSort[side].col === col) { 
+                dualSort[side].dir = dualSort[side].dir === 'desc' ? 'asc' : 'desc'; 
+            } else { 
+                dualSort[side].col = col; 
+                dualSort[side].dir = 'desc'; 
+            } 
+            renderTable(); 
+        } 
+
         function toggleView() { 
             viewMode = viewMode === 'dual' ? 'full' : 'dual'; 
             renderTable(); 
@@ -443,12 +459,36 @@
             const normalDown = sorted.filter(x => Number(x.change_pct) <   0 && Number(x.change_pct) > -5); 
             const pinnedDown = sorted.filter(x => Number(x.change_pct) <= -5); 
             
-            const topGainers = [...pinnedUp,   ...normalUp  ].slice(0, 20); 
-            const topLosers  = [...pinnedDown, ...normalDown ].slice(0, 20);  // 跌幅榜：跌最多的在顶 
+            const topGainers = [...pinnedUp,   ...normalUp  ]; 
+            const topLosers  = [...pinnedDown, ...normalDown]; 
         
             const buildTable = (list, side) => { 
+                const { col, dir } = dualSort[side]; 
+                const pinned = list.filter(x => side === 'up' ? Number(x.change_pct) >= 5 : Number(x.change_pct) <= -5); 
+                const normal = list.filter(x => side === 'up' ? Number(x.change_pct) <  5 : Number(x.change_pct) >  -5); 
+            
+                const sortFn = (a, b) => { 
+                    let valA, valB; 
+                    if (col === '2m') { 
+                        valA = get2mChange(a.symbol, Number(a.last_price)) ?? -Infinity; 
+                        valB = get2mChange(b.symbol, Number(b.last_price)) ?? -Infinity; 
+                    } else { 
+                        valA = Number(a[col]); 
+                        valB = Number(b[col]); 
+                    } 
+                    return dir === 'desc' ? valB - valA : valA - valB; 
+                }; 
+            
+                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)]; 
+            
+                const icon = (c) => { 
+                    if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>'; 
+                    return dualSort[side].dir === 'asc' ? '↑' : '↓'; 
+                }; 
+                const thCls = (c) => dualSort[side].col === c ? 'style="color:#007acc;cursor:pointer"' : 'style="cursor:pointer"'; 
+
                 let rows = ''; 
-                list.forEach((item, i) => { 
+                sortedList.forEach((item, i) => { 
                     const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down'; 
                     const change3mClass = Number(item.price_change_3m) > 0 ? 'up' : (Number(item.price_change_3m) < 0 ? 'down' : 'flat'); 
                     const volumeRatio = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-'; 
@@ -493,14 +533,14 @@
                             <tr> 
                                 <th style="text-align:center">#</th> 
                                 <th style="text-align:left">代码</th> 
-                                <th>最新价</th> 
-                                <th>开盘价</th> 
-                                <th>涨跌额</th> 
-                                <th>${side === 'up' ? '涨幅%' : '跌幅%'}</th> 
-                                <th>成交量</th> 
-                                <th>3分涨跌</th> 
-                                <th>2分涨跌</th> 
-                                <th>10日均量</th> 
+                                <th onclick="handleDualSort('${side}','last_price')"   ${thCls('last_price')}>最新价 ${icon('last_price')}</th> 
+                                <th onclick="handleDualSort('${side}','open_price')"   ${thCls('open_price')}>开盘价 ${icon('open_price')}</th> 
+                                <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th> 
+                                <th onclick="handleDualSort('${side}','change_pct')"   ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th> 
+                                <th onclick="handleDualSort('${side}','total_volume')" ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th> 
+                                <th onclick="handleDualSort('${side}','price_change_3m')" ${thCls('price_change_3m')}>3分涨跌 ${icon('price_change_3m')}</th> 
+                                <th onclick="handleDualSort('${side}','2m')"           ${thCls('2m')}>2分涨跌 ${icon('2m')}</th> 
+                                <th onclick="handleDualSort('${side}','avg_vol_10d')"  ${thCls('avg_vol_10d')}>10日均量 ${icon('avg_vol_10d')}</th> 
                                 <th>量比</th> 
                             </tr> 
                         </thead> 
