@@ -298,6 +298,16 @@
             }, 500); // Wait 500ms after last input
         }
 
+        function get2mChange(symbol, currentPrice) { 
+            const state = symbolStates[symbol]; 
+            if (!state || state.history.length === 0) return null; 
+            const now = Date.now(); 
+            // 找最接近2分钟前的记录 
+            const target = now - 120000; 
+            const old = state.history.find(h => h.t >= target) || state.history[0]; 
+            return currentPrice - old.p; 
+        } 
+
         function handleSort(column) {
             if (sortColumn === column) {
                 // Toggle direction
@@ -326,8 +336,8 @@
                 // Add current price to history
                 state.history.push({ t: now, p: currentPrice });
                 
-                // Keep only last 60 seconds of history
-                state.history = state.history.filter(h => now - h.t <= 60000);
+                // Keep only last 120 seconds of history
+                state.history = state.history.filter(h => now - h.t <= 120000);
 
                 if (state.history.length > 0) {
                     // Compare with the oldest price in our 60s window
@@ -426,8 +436,15 @@
             
             // 按涨跌幅排序，取前20 
             const sorted = [...currentData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct)); 
-            const topGainers = sorted.slice(0, 20); 
-            const topLosers  = sorted.slice(-20).reverse(); // 跌幅最大的倒序 
+            
+            // 置顶：涨幅≥5%的永远排在最前，内部仍按涨幅降序 
+            const pinnedUp   = sorted.filter(x => Number(x.change_pct) >=  5); 
+            const normalUp   = sorted.filter(x => Number(x.change_pct) <   5 && Number(x.change_pct) >= 0); 
+            const normalDown = sorted.filter(x => Number(x.change_pct) <   0 && Number(x.change_pct) > -5); 
+            const pinnedDown = sorted.filter(x => Number(x.change_pct) <= -5); 
+            
+            const topGainers = [...pinnedUp,   ...normalUp  ].slice(0, 20); 
+            const topLosers  = [...pinnedDown, ...normalDown ].slice(0, 20);  // 跌幅榜：跌最多的在顶 
         
             const buildTable = (list, side) => { 
                 let rows = ''; 
@@ -440,9 +457,23 @@
                     if (state?.warning?.active) { 
                         rowClass = state.warning.direction === 'up' ? 'warning-up' : 'warning-down'; 
                     } 
+            
+                    // 置顶标识 
+                    const pct = Number(item.change_pct); 
+                    const isPinned = side === 'up' ? pct >= 5 : pct <= -5; 
+                    const pinnedMark = isPinned ? ' 📌' : ''; 
+                    const rowStyle = isPinned ? ' style="border-left: 3px solid ' + (side === 'up' ? '#26a69a' : '#ef5350') + '"' : ''; 
+            
+                    // 2分钟涨跌 
+                    const change2m = get2mChange(item.symbol, Number(item.last_price)); 
+                    const change2mClass = change2m > 0 ? 'up' : (change2m < 0 ? 'down' : 'flat'); 
+                    const change2mStr = change2m !== null 
+                        ? `<span class="${change2mClass}">${change2m > 0 ? '+' : ''}${change2m.toFixed(2)}</span>` 
+                        : '-'; 
+            
                     rows += ` 
-                        <tr class="${rowClass}"> 
-                            <td style="text-align:center;color:#666">${i + 1}</td> 
+                        <tr class="${rowClass}"${rowStyle}> 
+                            <td style="text-align:center;color:#666">${i + 1}${pinnedMark}</td> 
                             <td class="symbol">${item.symbol}</td> 
                             <td class="${changeClass}">${formatNumber(item.last_price)}</td> 
                             <td>${formatNumber(item.open_price)}</td> 
@@ -450,6 +481,7 @@
                             <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td> 
                             <td>${formatVolume(item.total_volume)}</td> 
                             <td class="${change3mClass}">${item.price_change_3m > 0 ? '+' : ''}${formatNumber(item.price_change_3m)}</td> 
+                            <td>${change2mStr}</td> 
                             <td>${formatVolume(item.avg_vol_10d)}</td> 
                             <td>${volumeRatio}x</td> 
                         </tr>`; 
@@ -467,6 +499,7 @@
                                 <th>${side === 'up' ? '涨幅%' : '跌幅%'}</th> 
                                 <th>成交量</th> 
                                 <th>3分涨跌</th> 
+                                <th>2分涨跌</th> 
                                 <th>10日均量</th> 
                                 <th>量比</th> 
                             </tr> 
