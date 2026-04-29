@@ -389,16 +389,17 @@
                 state.history = state.history.filter(h => now - h.t <= 120000);
 
                 if (state.history.length > 0) {
-                    // Compare with the oldest price in our 60s window
-                    const oldestPrice = state.history[0].p;
+                    const now1m = Date.now() - 60000; 
+                    const ref = state.history.find(h => h.t >= now1m) || state.history[0]; 
+                    const oldestPrice = ref.p; 
                     const change1m = currentPrice - oldestPrice;
                     const absChange = Math.abs(change1m);
 
                     if (state.warning.active) {
                         if (now > state.warning.endTime) {
                             // Expired
-                            if (absChange > 1) {
-                                // Re-trigger if still > 1
+                            if (absChange > 0.5) {
+                                // Re-trigger if still > 0.5
                                 state.warning = {
                                     active: true,
                                     startTime: now,
@@ -421,7 +422,7 @@
                         }
                     } else {
                         // Not active: check if triggered
-                        if (absChange > 1) {
+                        if (absChange > 0.5) {
                             state.warning = {
                                 active: true,
                                 startTime: now,
