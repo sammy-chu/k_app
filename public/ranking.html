@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 1000px;
+            max-width: 1600px;
             margin: 0 auto;
         }
 
@@ -199,6 +199,12 @@
             grid-template-columns: 1fr 1fr; 
             gap: 16px; 
         } 
+
+        .dual-panel th, 
+        .dual-panel td { 
+            padding: 8px 8px; 
+            font-size: 13px; 
+        }
         
         .panel { 
             background-color: #252525; 
@@ -426,7 +432,9 @@
             const buildTable = (list, side) => { 
                 let rows = ''; 
                 list.forEach((item, i) => { 
-                    const cls = Number(item.change_pct) >= 0 ? 'up' : 'down'; 
+                    const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down'; 
+                    const change3mClass = Number(item.price_change_3m) > 0 ? 'up' : (Number(item.price_change_3m) < 0 ? 'down' : 'flat'); 
+                    const volumeRatio = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-'; 
                     const state = symbolStates[item.symbol]; 
                     let rowClass = ''; 
                     if (state?.warning?.active) { 
@@ -436,9 +444,14 @@
                         <tr class="${rowClass}"> 
                             <td style="text-align:center;color:#666">${i + 1}</td> 
                             <td class="symbol">${item.symbol}</td> 
-                            <td class="${cls}">${formatNumber(item.last_price)}</td> 
-                            <td class="${cls}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td> 
+                            <td class="${changeClass}">${formatNumber(item.last_price)}</td> 
+                            <td>${formatNumber(item.open_price)}</td> 
+                            <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td> 
+                            <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td> 
                             <td>${formatVolume(item.total_volume)}</td> 
+                            <td class="${change3mClass}">${item.price_change_3m > 0 ? '+' : ''}${formatNumber(item.price_change_3m)}</td> 
+                            <td>${formatVolume(item.avg_vol_10d)}</td> 
+                            <td>${volumeRatio}x</td> 
                         </tr>`; 
                 }); 
         
@@ -449,8 +462,13 @@
                                 <th style="text-align:center">#</th> 
                                 <th style="text-align:left">代码</th> 
                                 <th>最新价</th> 
+                                <th>开盘价</th> 
+                                <th>涨跌额</th> 
                                 <th>${side === 'up' ? '涨幅%' : '跌幅%'}</th> 
                                 <th>成交量</th> 
+                                <th>3分涨跌</th> 
+                                <th>10日均量</th> 
+                                <th>量比</th> 
                             </tr> 
                         </thead> 
                         <tbody>${rows}</tbody> 
