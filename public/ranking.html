@@ -490,8 +490,6 @@
                 let rows = ''; 
                 sortedList.forEach((item, i) => { 
                     const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down'; 
-                    const change3mClass = Number(item.price_change_3m) > 0 ? 'up' : (Number(item.price_change_3m) < 0 ? 'down' : 'flat'); 
-                    const volumeRatio = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-'; 
                     const state = symbolStates[item.symbol]; 
                     let rowClass = ''; 
                     if (state?.warning?.active) { 
@@ -520,10 +518,7 @@
                             <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td> 
                             <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td> 
                             <td>${formatVolume(item.total_volume)}</td> 
-                            <td class="${change3mClass}">${item.price_change_3m > 0 ? '+' : ''}${formatNumber(item.price_change_3m)}</td> 
                             <td>${change2mStr}</td> 
-                            <td>${formatVolume(item.avg_vol_10d)}</td> 
-                            <td>${volumeRatio}x</td> 
                         </tr>`; 
                 }); 
         
@@ -538,10 +533,7 @@
                                 <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th> 
                                 <th onclick="handleDualSort('${side}','change_pct')"   ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th> 
                                 <th onclick="handleDualSort('${side}','total_volume')" ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th> 
-                                <th onclick="handleDualSort('${side}','price_change_3m')" ${thCls('price_change_3m')}>3分涨跌 ${icon('price_change_3m')}</th> 
                                 <th onclick="handleDualSort('${side}','2m')"           ${thCls('2m')}>2分涨跌 ${icon('2m')}</th> 
-                                <th onclick="handleDualSort('${side}','avg_vol_10d')"  ${thCls('avg_vol_10d')}>10日均量 ${icon('avg_vol_10d')}</th> 
-                                <th>量比</th> 
                             </tr> 
                         </thead> 
                         <tbody>${rows}</tbody> 
