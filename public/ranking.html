@@ -194,7 +194,31 @@
             background-color: rgba(239, 83, 80, 0.2) !important;
         }
 
+        .dual-panel { 
+            display: grid; 
+            grid-template-columns: 1fr 1fr; 
+            gap: 16px; 
+        } 
+        
+        .panel { 
+            background-color: #252525; 
+            border-radius: 8px; 
+            overflow: hidden; 
+        } 
+        
+        .panel-title { 
+            padding: 10px 15px; 
+            font-size: 14px; 
+            font-weight: 600; 
+            background-color: #2a2a2a; 
+            border-bottom: 1px solid #333; 
+        } 
+
         @media (max-width: 768px) {
+            .dual-panel { 
+                grid-template-columns: 1fr; /* 手机端改为上下堆叠 */ 
+            } 
+
             .header-bar {
                 flex-direction: column;
                 align-items: flex-start;
@@ -237,6 +261,7 @@
                     </div>
                 </div>
                 <span class="refresh-info" id="refresh-timer">1s</span>
+                <button class="sort-btn" onclick="toggleView()">切换视图</button>
             </div>
         </div>
 
@@ -253,6 +278,12 @@
         let timer = null;
         let countdown = 1;
         let debounceTimer = null;
+        let viewMode = 'dual'; // 'dual' | 'full' 
+
+        function toggleView() { 
+            viewMode = viewMode === 'dual' ? 'full' : 'dual'; 
+            renderTable(); 
+        } 
 
         function debounceFetch() {
             clearTimeout(debounceTimer);
@@ -382,6 +413,64 @@
                 return;
             }
 
+            if (viewMode === 'full') { 
+                renderFullTable(); 
+                return; 
+            } 
+            
+            // 按涨跌幅排序，取前20 
+            const sorted = [...currentData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct)); 
+            const topGainers = sorted.slice(0, 20); 
+            const topLosers  = sorted.slice(-20).reverse(); // 跌幅最大的倒序 
+        
+            const buildTable = (list, side) => { 
+                let rows = ''; 
+                list.forEach((item, i) => { 
+                    const cls = Number(item.change_pct) >= 0 ? 'up' : 'down'; 
+                    const state = symbolStates[item.symbol]; 
+                    let rowClass = ''; 
+                    if (state?.warning?.active) { 
+                        rowClass = state.warning.direction === 'up' ? 'warning-up' : 'warning-down'; 
+                    } 
+                    rows += ` 
+                        <tr class="${rowClass}"> 
+                            <td style="text-align:center;color:#666">${i + 1}</td> 
+                            <td class="symbol">${item.symbol}</td> 
+                            <td class="${cls}">${formatNumber(item.last_price)}</td> 
+                            <td class="${cls}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td> 
+                            <td>${formatVolume(item.total_volume)}</td> 
+                        </tr>`; 
+                }); 
+        
+                return ` 
+                    <table> 
+                        <thead> 
+                            <tr> 
+                                <th style="text-align:center">#</th> 
+                                <th style="text-align:left">代码</th> 
+                                <th>最新价</th> 
+                                <th>${side === 'up' ? '涨幅%' : '跌幅%'}</th> 
+                                <th>成交量</th> 
+                            </tr> 
+                        </thead> 
+                        <tbody>${rows}</tbody> 
+                    </table>`; 
+            }; 
+        
+            document.getElementById('content').innerHTML = ` 
+                <div class="dual-panel"> 
+                    <div class="panel panel-up"> 
+                        <div class="panel-title up">▲ 涨幅榜 Top 20</div> 
+                        ${buildTable(topGainers, 'up')} 
+                    </div> 
+                    <div class="panel panel-down"> 
+                        <div class="panel-title down">▼ 跌幅榜 Top 20</div> 
+                        ${buildTable(topLosers, 'down')} 
+                    </div> 
+                </div>`; 
+        }
+
+        function renderFullTable() {
             // Sort data
             const sorted = [...currentData].sort((a, b) => {
                 let valA = a[sortColumn];
