@@ -265,6 +265,12 @@
                         <label>3分钟波动:</label>
                         <input type="number" id="min-3m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()">
                     </div>
+                    <div class="filter-item"> 
+                        <label>价格区间:</label> 
+                        <input type="number" id="min-price" class="filter-input" value="0" step="0.01" placeholder="最低" oninput="renderTable()"> 
+                        <span style="color:#666">~</span> 
+                        <input type="number" id="max-price" class="filter-input" value="" step="0.01" placeholder="最高" oninput="renderTable()"> 
+                    </div> 
                 </div>
                 <span class="refresh-info" id="refresh-timer">1s</span>
                 <button class="sort-btn" onclick="toggleView()">切换视图</button>
@@ -445,14 +451,27 @@
                 return;
             }
 
-            if (viewMode === 'full') { 
-                renderFullTable(); 
+            // 价格筛选 
+            const minPrice = parseFloat(document.getElementById('min-price').value) || 0; 
+            const maxPrice = parseFloat(document.getElementById('max-price').value) || Infinity; 
+            const filteredData = currentData.filter(item => { 
+                const p = Number(item.last_price); 
+                return p >= minPrice && p <= maxPrice; 
+            }); 
+        
+            if (filteredData.length === 0) { 
+                document.getElementById('content').innerHTML = '<div class="loading">暂无符合价格区间的数据</div>'; 
                 return; 
             } 
-            
-            // 按涨跌幅排序，取前20 
-            const sorted = [...currentData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct)); 
-            
+
+            if (viewMode === 'full') { 
+                renderFullTable(filteredData); 
+                return; 
+            } 
+
+            // dual 模式涨幅榜排序
+            const sorted = [...filteredData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
+
             // 置顶：涨幅≥5%的永远排在最前，内部仍按涨幅降序 
             const pinnedUp   = sorted.filter(x => Number(x.change_pct) >=  5); 
             const normalUp   = sorted.filter(x => Number(x.change_pct) <   5 && Number(x.change_pct) >= 0); 
@@ -553,9 +572,9 @@
                 </div>`; 
         }
 
-        function renderFullTable() {
+        function renderFullTable(data = currentData) {
             // Sort data
-            const sorted = [...currentData].sort((a, b) => {
+            const sorted = [...data].sort((a, b) => {
                 let valA = a[sortColumn];
                 let valB = b[sortColumn];
 
