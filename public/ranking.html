@@ -261,10 +261,10 @@
                         <label>最小成交量:</label>
                         <input type="number" id="min-volume" class="filter-input" value="0" oninput="debounceFetch()">
                     </div>
-                    <div class="filter-item">
-                        <label>3分钟波动:</label>
-                        <input type="number" id="min-3m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()">
-                    </div>
+                    <div class="filter-item"> 
+                        <label>2分钟波动:</label> 
+                        <input type="number" id="min-2m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()"> 
+                    </div> 
                     <div class="filter-item"> 
                         <label>价格区间:</label> 
                         <input type="number" id="min-price" class="filter-input" value="0" step="0.01" placeholder="最低" oninput="renderTable()"> 
@@ -413,9 +413,8 @@
             isFetching = true;
             try {
                 const minVol = document.getElementById('min-volume').value;
-                const min3mChange = document.getElementById('min-3m-change').value;
                 
-                const res = await fetch(`/api/ranking?min_volume=${minVol}&min_price_change_3m=${min3mChange}`);
+                const res = await fetch(`/api/ranking?min_volume=${minVol}`);
                 if (!res.ok) throw new Error('Network response was not ok');
                 currentData = await res.json();
                 processWarnings(currentData);
@@ -454,9 +453,19 @@
             // 价格筛选 
             const minPrice = parseFloat(document.getElementById('min-price').value) || 0; 
             const maxPrice = parseFloat(document.getElementById('max-price').value) || Infinity; 
+            const min2mChange = parseFloat(document.getElementById('min-2m-change').value) || 0; 
+            
             const filteredData = currentData.filter(item => { 
                 const p = Number(item.last_price); 
-                return p >= minPrice && p <= maxPrice; 
+                if (p < minPrice || p > maxPrice) return false; 
+            
+                // 2分钟涨跌绝对值筛选 
+                if (min2mChange > 0) { 
+                    const change2m = get2mChange(item.symbol, Number(item.last_price)); 
+                    if (change2m === null || Math.abs(change2m) < min2mChange) return false; 
+                } 
+            
+                return true; 
             }); 
         
             if (filteredData.length === 0) { 
