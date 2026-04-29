@@ -348,6 +348,15 @@
             return currentPrice - old.p; 
         } 
 
+        function get1mChange(symbol, currentPrice) { 
+            const state = symbolStates[symbol]; 
+            if (!state || state.history.length === 0) return null; 
+            const now = Date.now(); 
+            const target = now - 60000; 
+            const old = state.history.find(h => h.t >= target) || state.history[0]; 
+            return currentPrice - old.p; 
+        }
+
         function handleSort(column) {
             if (sortColumn === column) {
                 // Toggle direction
@@ -638,6 +647,7 @@
                             <th onclick="handleSort('change_amount')" class="${getHeaderClass('change_amount')}">涨跌额 <span class="sort-icon">${getSortIcon('change_amount')}</span></th>
                             <th onclick="handleSort('change_pct')" class="${getHeaderClass('change_pct')}">涨跌幅% <span class="sort-icon">${getSortIcon('change_pct')}</span></th>
                             <th onclick="handleSort('total_volume')" class="${getHeaderClass('total_volume')}">成交量 <span class="sort-icon">${getSortIcon('total_volume')}</span></th>
+                            <th>1分涨跌</th> 
                             <th onclick="handleSort('price_change_3m')" class="${getHeaderClass('price_change_3m')}">3分涨跌 <span class="sort-icon">${getSortIcon('price_change_3m')}</span></th>
                             <th class="hide-mobile ${getHeaderClass('avg_vol_10d')}" onclick="handleSort('avg_vol_10d')">10日均量 <span class="sort-icon">${getSortIcon('avg_vol_10d')}</span></th>
                             <th class="hide-mobile">量比</th>
@@ -666,6 +676,12 @@
                         <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
                         <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
                         <td>${formatVolume(item.total_volume)}</td>
+                        <td>${(() => { 
+                            const c = get1mChange(item.symbol, Number(item.last_price)); 
+                            if (c === null) return '-'; 
+                            const cls = c > 0 ? 'up' : (c < 0 ? 'down' : 'flat'); 
+                            return `<span class="${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>`; 
+                        })()}</td> 
                         <td class="${change3mClass}">${item.price_change_3m > 0 ? '+' : ''}${formatNumber(item.price_change_3m)}</td>
                         <td class="hide-mobile">${formatVolume(item.avg_vol_10d)}</td>
                         <td class="hide-mobile">${volumeRatio}x</td>
