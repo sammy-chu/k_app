@@ -523,19 +523,38 @@
             // dual 模式涨幅榜排序
             const sorted = [...filteredData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
 
-            // 置顶：涨幅≥5%的永远排在最前，内部仍按涨幅降序 
-            const pinnedUp   = sorted.filter(x => pinnedUpSymbols.has(x.symbol)); 
-            const normalUp   = sorted.filter(x => !pinnedUpSymbols.has(x.symbol) && Number(x.change_pct) >= 0); 
-            const pinnedDown = sorted.filter(x => pinnedDownSymbols.has(x.symbol)); 
-            const normalDown = sorted.filter(x => !pinnedDownSymbols.has(x.symbol) && Number(x.change_pct) < 0); 
-            
-            const topGainers = [...pinnedUp,   ...normalUp  ]; 
-            const topLosers  = [...pinnedDown, ...normalDown]; 
+            function isActiveWarning(item, side) { 
+                const s = symbolStates[item.symbol]; 
+                if (!s?.warning?.active) return false; 
+                if (s.warning.direction !== side) return false; 
+                const c = get1mChange(item.symbol, Number(item.last_price)); 
+                return c !== null && Math.abs(c) >= 0.5; 
+            } 
+
+            const warningUp   = sorted.filter(x => isActiveWarning(x, 'up')); 
+            const pinnedUp    = sorted.filter(x => !isActiveWarning(x, 'up') && pinnedUpSymbols.has(x.symbol)); 
+            const normalUp    = sorted.filter(x => !isActiveWarning(x, 'up') && !pinnedUpSymbols.has(x.symbol) && Number(x.change_pct) >= 0); 
+ 
+            const warningDown = sorted.filter(x => isActiveWarning(x, 'down')); 
+            const pinnedDown  = sorted.filter(x => !isActiveWarning(x, 'down') && pinnedDownSymbols.has(x.symbol)); 
+            const normalDown  = sorted.filter(x => !isActiveWarning(x, 'down') && !pinnedDownSymbols.has(x.symbol) && Number(x.change_pct) < 0); 
+ 
+            const topGainers = [...warningUp,   ...pinnedUp,   ...normalUp  ]; 
+            const topLosers  = [...warningDown, ...pinnedDown, ...normalDown]; 
         
             const buildTable = (list, side) => { 
                 const { col, dir } = dualSort[side]; 
-                const pinned = list.filter(x => side === 'up' ? pinnedUpSymbols.has(x.symbol) : pinnedDownSymbols.has(x.symbol)); 
-                const normal = list.filter(x => side === 'up' ? !pinnedUpSymbols.has(x.symbol) && Number(x.change_pct) >= 0 : !pinnedDownSymbols.has(x.symbol) && Number(x.change_pct) < 0); 
+                const warning = list.filter(x => isActiveWarning(x, side)); 
+                const pinned = list.filter(x => { 
+                    if (isActiveWarning(x, side)) return false; 
+                    return side === 'up' ? pinnedUpSymbols.has(x.symbol) : pinnedDownSymbols.has(x.symbol); 
+                }); 
+                const normal = list.filter(x => { 
+                    if (isActiveWarning(x, side)) return false; 
+                    return side === 'up' 
+                        ? !pinnedUpSymbols.has(x.symbol) && Number(x.change_pct) >= 0 
+                        : !pinnedDownSymbols.has(x.symbol) && Number(x.change_pct) < 0; 
+                }); 
             
                 const sortFn = (a, b) => { 
                     let valA, valB; 
@@ -549,7 +568,7 @@
                     return dir === 'desc' ? valB - valA : valA - valB; 
                 }; 
             
-                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)]; 
+                const sortedList = [...warning.sort(sortFn), ...pinned.sort(sortFn), ...normal.sort(sortFn)]; 
             
                 const icon = (c) => { 
                     if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>'; 
@@ -567,8 +586,9 @@
                     } 
             
                     // 置顶标识 
-                    const isPinned = side === 'up' ? pinnedUpSymbols.has(item.symbol) : pinnedDownSymbols.has(item.symbol); 
-                    const pinnedMark = isPinned ? ' 📌' : ''; 
+                    const isWarningActive = isActiveWarning(item, side); 
+                    const isPinned = isWarningActive || (side === 'up' ? pinnedUpSymbols.has(item.symbol) : pinnedDownSymbols.has(item.symbol)); 
+                    const pinnedMark = isPinned ? (isWarningActive ? ' ⚡' : ' 📌') : ''; 
                     const rowStyle = isPinned ? ' style="border-left: 3px solid ' + (side === 'up' ? '#26a69a' : '#ef5350') + '"' : ''; 
             
                     // 2分钟涨跌 
