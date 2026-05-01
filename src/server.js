@@ -518,23 +518,30 @@ async function refreshRankingCache() {
       HAVING AVG(total_volume) >= 1000
     ),
     today AS (
-      SELECT symbol, open_price, close_price, total_volume
+      SELECT symbol, open_price, total_volume
       FROM market_data.daily_summary
       WHERE trade_date = current_date
+    ),
+    latest_trades AS (
+      SELECT DISTINCT ON (symbol) symbol, price AS last_price
+      FROM tos_trades
+      WHERE received_at >= current_date
+      ORDER BY symbol, received_at DESC
     )
     SELECT
       t.symbol,
       t.open_price,
-      t.close_price AS last_price,
-      (t.close_price - t.open_price) AS change_amount,
-      ROUND((t.close_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
+      lt.last_price,
+      (lt.last_price - t.open_price) AS change_amount,
+      ROUND((lt.last_price - t.open_price) / NULLIF(t.open_price, 0) * 100, 2) AS change_pct,
       t.total_volume,
       COALESCE(ROUND(a.avg_vol), 0) AS avg_vol_10d
     FROM today t
+    JOIN latest_trades lt USING (symbol)
     LEFT JOIN avg_vol a USING (symbol)
     WHERE NOT (t.symbol = ANY($1::text[]))
       AND t.open_price > 0
-    ORDER BY (t.close_price - t.open_price) DESC;
+    ORDER BY (lt.last_price - t.open_price) DESC;
   `;
   const client = await pool.connect();
   try {
@@ -1255,7 +1262,7 @@ function startAlertMonitor() {
 
   // 4. Ranking 缓存后台刷新 (每30秒)
   console.log(`[RankingCache] starting, interval=30s`);
-  runScan('RankingCache', refreshRankingCache, 30000);
+  runScan('RankingCache', refreshRankingCache, 5000);
 
   // 5. 3分钟价格窗口缓存 (供 ranking API 使用)
   console.log(`[PriceWindow] starting, interval=10s`);
