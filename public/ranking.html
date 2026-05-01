@@ -113,7 +113,7 @@
             font-size: 14px;
             cursor: pointer;
         }
-        
+
         th:first-child, td:first-child {
             text-align: center;
         }
@@ -129,7 +129,7 @@
         .up { color: #26a69a; }
         .down { color: #ef5350; }
         .flat { color: #888; }
-        
+
         .symbol {
             font-weight: bold;
             color: #fff;
@@ -156,7 +156,7 @@
         th.active {
             color: #007acc;
         }
-        
+
         th.active .sort-icon {
             color: #007acc;
         }
@@ -170,7 +170,7 @@
             border-radius: 4px;
             margin-right: 15px;
         }
-        
+
         .filter-item {
             display: flex;
             align-items: center;
@@ -186,56 +186,48 @@
             width: 80px;
         }
 
-        .warning-up {
-            background-color: rgba(38, 166, 154, 0.2) !important;
-        }
-        
-        .warning-down {
-            background-color: rgba(239, 83, 80, 0.2) !important;
+        .dual-panel {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
         }
 
-        .dual-panel { 
-            display: grid; 
-            grid-template-columns: 1fr 1fr; 
-            gap: 16px; 
-        } 
-
-        .dual-panel th, 
-        .dual-panel td { 
-            padding: 8px 8px; 
-            font-size: 13px; 
+        .dual-panel th,
+        .dual-panel td {
+            padding: 8px 8px;
+            font-size: 13px;
         }
-        
-        .panel { 
-            background-color: #252525; 
-            border-radius: 8px; 
-            overflow: hidden; 
-        } 
-        
-        .panel-title { 
-            padding: 10px 15px; 
-            font-size: 14px; 
-            font-weight: 600; 
-            background-color: #2a2a2a; 
-            border-bottom: 1px solid #333; 
-        } 
+
+        .panel {
+            background-color: #252525;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .panel-title {
+            padding: 10px 15px;
+            font-size: 14px;
+            font-weight: 600;
+            background-color: #2a2a2a;
+            border-bottom: 1px solid #333;
+        }
 
         @media (max-width: 768px) {
-            .dual-panel { 
-                grid-template-columns: 1fr; /* 手机端改为上下堆叠 */ 
-            } 
+            .dual-panel {
+                grid-template-columns: 1fr;
+            }
 
             .header-bar {
                 flex-direction: column;
                 align-items: flex-start;
                 gap: 10px;
             }
-            
+
             .controls {
                 width: 100%;
                 flex-wrap: wrap;
             }
-            
+
             .filters {
                 flex-wrap: wrap;
                 margin-right: 0;
@@ -261,16 +253,16 @@
                         <label>最小成交量:</label>
                         <input type="number" id="min-volume" class="filter-input" value="0" oninput="debounceFetch()">
                     </div>
-                    <div class="filter-item"> 
-                        <label>2分钟波动:</label> 
-                        <input type="number" id="min-2m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()"> 
-                    </div> 
-                    <div class="filter-item"> 
-                        <label>价格区间:</label> 
-                        <input type="number" id="min-price" class="filter-input" value="0" step="0.01" placeholder="最低" oninput="renderTable()"> 
-                        <span style="color:#666">~</span> 
-                        <input type="number" id="max-price" class="filter-input" value="" step="0.01" placeholder="最高" oninput="renderTable()"> 
-                    </div> 
+                    <div class="filter-item">
+                        <label>2分钟波动:</label>
+                        <input type="number" id="min-2m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()">
+                    </div>
+                    <div class="filter-item">
+                        <label>价格区间:</label>
+                        <input type="number" id="min-price" class="filter-input" value="0" step="0.01" placeholder="最低" oninput="renderTable()">
+                        <span style="color:#666">~</span>
+                        <input type="number" id="max-price" class="filter-input" value="" step="0.01" placeholder="最高" oninput="renderTable()">
+                    </div>
                 </div>
                 <span class="refresh-info" id="refresh-timer">1s</span>
                 <button class="sort-btn" onclick="toggleView()">切换视图</button>
@@ -284,86 +276,128 @@
 
     <script>
         let currentData = [];
-        let symbolStates = {}; // Track price history and warning states
-        let sortColumn = 'change_amount'; // default sort column
-        let sortDirection = 'desc'; // 'asc' or 'desc'
-        let timer = null;
+        let symbolStates = {};
+        let sortColumn = 'change_amount';
+        let sortDirection = 'desc';
         let countdown = 1;
         let debounceTimer = null;
-        let viewMode = 'dual'; // 'dual' | 'full' 
+        let viewMode = 'dual';
 
-        // 双列各自的排序状态 
-        let dualSort = { 
-            up:   { col: 'change_pct', dir: 'desc' }, 
-            down: { col: 'change_pct', dir: 'desc' } 
-        }; 
+        // 双列各自的排序状态
+        let dualSort = {
+            up:   { col: 'change_pct', dir: 'desc' },
+            down: { col: 'change_pct', dir: 'desc' }
+        };
 
-        const pinnedUpSymbols   = new Set(); // 曾经涨幅≥5%的 
-        const pinnedDownSymbols = new Set(); // 曾经跌幅≤-5%的 
-        
-        // 页面初始化时恢复持久化的置顶记录
-        JSON.parse(sessionStorage.getItem('pinnedUp')   || '[]').forEach(s => pinnedUpSymbols.add(s)); 
-        JSON.parse(sessionStorage.getItem('pinnedDown') || '[]').forEach(s => pinnedDownSymbols.add(s)); 
+        // ── 置顶 Map：symbol -> firstPinnedTime ──────────────────────────
+        // 改为 Map 存首次触发5%的时间戳，支持10分钟临时置顶逻辑
+        const pinnedUpSymbols   = new Map();
+        const pinnedDownSymbols = new Map();
+        const PIN_KEEP_MS = 10 * 60 * 1000; // 10分钟
 
-        function updatePinned(data) { 
-            data.forEach(item => { 
-                const pct = Number(item.change_pct); 
-                if (pct >= 5)  pinnedUpSymbols.add(item.symbol); 
-                if (pct <= -5) pinnedDownSymbols.add(item.symbol); 
-            }); 
-            // 更新后保存到 sessionStorage 以跨刷新持久化
-            sessionStorage.setItem('pinnedUp',   JSON.stringify([...pinnedUpSymbols])); 
-            sessionStorage.setItem('pinnedDown', JSON.stringify([...pinnedDownSymbols])); 
-        } 
-        
-        function handleDualSort(side, col) { 
-            if (dualSort[side].col === col) { 
-                dualSort[side].dir = dualSort[side].dir === 'desc' ? 'asc' : 'desc'; 
-            } else { 
-                dualSort[side].col = col; 
-                dualSort[side].dir = 'desc'; 
-            } 
-            renderTable(); 
-        } 
+        // 页面初始化时从 sessionStorage 恢复（存储格式为 [[symbol, time], ...]）
+        JSON.parse(sessionStorage.getItem('pinnedUp')   || '[]').forEach(([s, t]) => pinnedUpSymbols.set(s, t));
+        JSON.parse(sessionStorage.getItem('pinnedDown') || '[]').forEach(([s, t]) => pinnedDownSymbols.set(s, t));
 
-        function toggleView() { 
-            viewMode = viewMode === 'dual' ? 'full' : 'dual'; 
-            renderTable(); 
-        } 
+        // 只在首次触发5%时记录时间，不覆盖
+        function updatePinned(data) {
+            const now = Date.now();
+            data.forEach(item => {
+                const pct = Number(item.change_pct);
+                if (pct >= 5  && !pinnedUpSymbols.has(item.symbol))   pinnedUpSymbols.set(item.symbol, now);
+                if (pct <= -5 && !pinnedDownSymbols.has(item.symbol)) pinnedDownSymbols.set(item.symbol, now);
+            });
+            sessionStorage.setItem('pinnedUp',   JSON.stringify([...pinnedUpSymbols]));
+            sessionStorage.setItem('pinnedDown', JSON.stringify([...pinnedDownSymbols]));
+        }
+
+        /**
+         * 判断 symbol 是否处于置顶状态
+         * 规则：
+         *   1. 曾触发5%涨/跌幅（在 Map 中）才有资格置顶
+         *   2. 实时当天涨跌额绝对值 >= 0.5 → 永久置顶
+         *   3. 实时当天涨跌额绝对值 < 0.5  → 仅保留首次触发后10分钟
+         *   4. 超过10分钟且涨跌额 < 0.5    → 退出置顶
+         *   5. 退出后若涨跌额重新 >= 0.5   → 重新置顶（回到规则2）
+         */
+        function isPinnedActive(item, side) {
+            const map = side === 'up' ? pinnedUpSymbols : pinnedDownSymbols;
+            if (!map.has(item.symbol)) return false;
+
+            const changeAmount = Math.abs(Number(item.change_amount));
+
+            // 规则2/5：实时涨跌额 >= 0.5 永久/重新置顶
+            if (changeAmount >= 0.5) return true;
+
+            // 规则3：涨跌额 < 0.5，看10分钟窗口
+            const firstTime = map.get(item.symbol);
+            return Date.now() - firstTime < PIN_KEEP_MS;
+        }
+
+        // 生成置顶标记文字（永久📌 / 临时显示剩余分钟⏱）
+        function getPinnedMark(item, side) {
+            const map = side === 'up' ? pinnedUpSymbols : pinnedDownSymbols;
+            if (!map.has(item.symbol)) return '';
+            const changeAmount = Math.abs(Number(item.change_amount));
+            if (changeAmount >= 0.5) return ' 📌';
+            const firstTime = map.get(item.symbol);
+            const remainMs = PIN_KEEP_MS - (Date.now() - firstTime);
+            if (remainMs <= 0) return '';
+            const remainMin = Math.ceil(remainMs / 60000);
+            return ` ⏱${remainMin}m`;
+        }
+
+        // ── 预警置顶（闪色行优先于5%置顶）────────────────────────────────
+        function isActiveWarning(item, side) {
+            const s = symbolStates[item.symbol];
+            if (!s?.warning?.active) return false;
+            if (s.warning.direction !== side) return false;
+            const c = get1mChange(item.symbol, Number(item.last_price));
+            return c !== null && Math.abs(c) >= 0.5;
+        }
+
+        function handleDualSort(side, col) {
+            if (dualSort[side].col === col) {
+                dualSort[side].dir = dualSort[side].dir === 'desc' ? 'asc' : 'desc';
+            } else {
+                dualSort[side].col = col;
+                dualSort[side].dir = 'desc';
+            }
+            renderTable();
+        }
+
+        function toggleView() {
+            viewMode = viewMode === 'dual' ? 'full' : 'dual';
+            renderTable();
+        }
 
         function debounceFetch() {
             clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => {
-                fetchData();
-            }, 500); // Wait 500ms after last input
+            debounceTimer = setTimeout(() => fetchData(), 500);
         }
 
-        function get2mChange(symbol, currentPrice) { 
-            const state = symbolStates[symbol]; 
-            if (!state || state.history.length === 0) return null; 
-            const now = Date.now(); 
-            // 找最接近2分钟前的记录 
-            const target = now - 120000; 
-            const old = state.history.find(h => h.t >= target) || state.history[0]; 
-            return currentPrice - old.p; 
-        } 
+        function get2mChange(symbol, currentPrice) {
+            const state = symbolStates[symbol];
+            if (!state || state.history.length === 0) return null;
+            const now = Date.now();
+            const old = state.history.find(h => h.t >= now - 120000) || state.history[0];
+            return currentPrice - old.p;
+        }
 
-        function get1mChange(symbol, currentPrice) { 
-            const state = symbolStates[symbol]; 
-            if (!state || state.history.length === 0) return null; 
-            const now = Date.now(); 
-            const target = now - 60000; 
-            const old = state.history.find(h => h.t >= target) || state.history[0]; 
-            return currentPrice - old.p; 
+        function get1mChange(symbol, currentPrice) {
+            const state = symbolStates[symbol];
+            if (!state || state.history.length === 0) return null;
+            const now = Date.now();
+            const old = state.history.find(h => h.t >= now - 60000) || state.history[0];
+            return currentPrice - old.p;
         }
 
         function handleSort(column) {
             if (sortColumn === column) {
-                // Toggle direction
                 sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
             } else {
                 sortColumn = column;
-                sortDirection = 'desc'; // Default to desc for new column
+                sortDirection = 'desc';
             }
             renderTable();
         }
@@ -382,66 +416,56 @@
                     symbolStates[item.symbol] = state;
                 }
 
-                // Add current price to history
                 state.history.push({ t: now, p: currentPrice });
-                
-                // Keep only last 120 seconds of history
                 state.history = state.history.filter(h => now - h.t <= 120000);
 
                 if (state.history.length > 0) {
-                    const now = Date.now(); 
+                    const nowMs = Date.now();
 
-                    // 1分钟涨跌 
-                    const ref1m = state.history.find(h => h.t >= now - 60000) || state.history[0]; 
-                    const change1m = currentPrice - ref1m.p; 
-                    const abs1m = Math.abs(change1m); 
-                
-                    // 2分钟涨跌 
-                    const ref2m = state.history.find(h => h.t >= now - 120000) || state.history[0]; 
-                    const change2m = currentPrice - ref2m.p; 
-                    const abs2m = Math.abs(change2m); 
-                
-                    // 任一条件触发 
-                    const triggered = abs1m > 0.5 || abs2m > 0.8; 
-                    // 预警方向取1分钟涨跌方向（更及时） 
-                    const direction = change1m !== 0 ? (change1m > 0 ? 'up' : 'down') : (change2m > 0 ? 'up' : 'down'); 
-                    // 用于判断是否"仍在活跃"的代表值 
-                    const absChange = Math.max(abs1m, abs2m); 
+                    // 1分钟涨跌
+                    const ref1m = state.history.find(h => h.t >= nowMs - 60000) || state.history[0];
+                    const change1m = currentPrice - ref1m.p;
+                    const abs1m = Math.abs(change1m);
+
+                    // 2分钟涨跌
+                    const ref2m = state.history.find(h => h.t >= nowMs - 120000) || state.history[0];
+                    const change2m = currentPrice - ref2m.p;
+                    const abs2m = Math.abs(change2m);
+
+                    // 任一条件触发预警
+                    const triggered = abs1m > 0.5 || abs2m > 0.8;
+                    const direction = change1m !== 0 ? (change1m > 0 ? 'up' : 'down') : (change2m > 0 ? 'up' : 'down');
+                    const absChange = Math.max(abs1m, abs2m);
 
                     if (state.warning.active) {
-                        if (now > state.warning.endTime) {
-                            // Expired
+                        if (nowMs > state.warning.endTime) {
                             if (triggered) {
-                                // Re-trigger
                                 state.warning = {
                                     active: true,
-                                    startTime: now,
-                                    endTime: now + 5 * 60 * 1000,
+                                    startTime: nowMs,
+                                    endTime: nowMs + 5 * 60 * 1000,
                                     maxChange: absChange,
-                                    direction 
+                                    direction
                                 };
                             } else {
                                 state.warning.active = false;
                             }
                         } else {
-                            // Active warning: check if change continues to increase
                             if (absChange > state.warning.maxChange) {
                                 state.warning.maxChange = absChange;
                                 const maxEndTime = state.warning.startTime + 30 * 60 * 1000;
-                                let newEndTime = now + 5 * 60 * 1000;
-                                state.warning.endTime = Math.min(newEndTime, maxEndTime);
-                                state.warning.direction = direction; 
+                                state.warning.endTime = Math.min(nowMs + 5 * 60 * 1000, maxEndTime);
+                                state.warning.direction = direction;
                             }
                         }
                     } else {
-                        // Not active: check if triggered
                         if (triggered) {
                             state.warning = {
                                 active: true,
-                                startTime: now,
-                                endTime: now + 5 * 60 * 1000,
+                                startTime: nowMs,
+                                endTime: nowMs + 5 * 60 * 1000,
                                 maxChange: absChange,
-                                direction 
+                                direction
                             };
                         }
                     }
@@ -454,7 +478,6 @@
             isFetching = true;
             try {
                 const minVol = document.getElementById('min-volume').value;
-                
                 const res = await fetch(`/api/ranking?min_volume=${minVol}`);
                 if (!res.ok) throw new Error('Network response was not ok');
                 currentData = await res.json();
@@ -463,9 +486,7 @@
                 renderTable();
                 resetTimer();
             } catch (err) {
-                // Don't wipe content on error, just log it or show toast
                 console.error('Fetch error:', err);
-                // Only show error if we have no data at all
                 if (!currentData || currentData.length === 0) {
                     document.getElementById('content').innerHTML = `<div class="error">加载失败: ${err.message}</div>`;
                 }
@@ -492,153 +513,148 @@
                 return;
             }
 
-            // 价格筛选 
-            const minPrice = parseFloat(document.getElementById('min-price').value) || 0; 
-            const maxPrice = parseFloat(document.getElementById('max-price').value) || Infinity; 
-            const min2mChange = parseFloat(document.getElementById('min-2m-change').value) || 0; 
-            
-            const filteredData = currentData.filter(item => { 
-                const p = Number(item.last_price); 
-                if (p < minPrice || p > maxPrice) return false; 
-            
-                // 2分钟涨跌绝对值筛选 
-                if (min2mChange > 0) { 
-                    const change2m = get2mChange(item.symbol, Number(item.last_price)); 
-                    if (change2m === null || Math.abs(change2m) < min2mChange) return false; 
-                } 
-            
-                return true; 
-            }); 
-        
-            if (filteredData.length === 0) { 
-                document.getElementById('content').innerHTML = '<div class="loading">暂无符合价格区间的数据</div>'; 
-                return; 
-            } 
+            // 筛选
+            const minPrice    = parseFloat(document.getElementById('min-price').value)    || 0;
+            const maxPrice    = parseFloat(document.getElementById('max-price').value)    || Infinity;
+            const min2mChange = parseFloat(document.getElementById('min-2m-change').value) || 0;
 
-            if (viewMode === 'full') { 
-                renderFullTable(filteredData); 
-                return; 
-            } 
+            const filteredData = currentData.filter(item => {
+                const p = Number(item.last_price);
+                if (p < minPrice || p > maxPrice) return false;
+                if (min2mChange > 0) {
+                    const c2m = get2mChange(item.symbol, Number(item.last_price));
+                    if (c2m === null || Math.abs(c2m) < min2mChange) return false;
+                }
+                return true;
+            });
 
-            // dual 模式涨幅榜排序
+            if (filteredData.length === 0) {
+                document.getElementById('content').innerHTML = '<div class="loading">暂无符合条件的数据</div>';
+                return;
+            }
+
+            if (viewMode === 'full') {
+                renderFullTable(filteredData);
+                return;
+            }
+
+            // dual 模式：三层优先级 预警置顶 > 5%置顶 > 普通
             const sorted = [...filteredData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
 
-            // 置顶：涨幅≥5%的永远排在最前，内部仍按涨幅降序 
-            const pinnedUp   = sorted.filter(x => pinnedUpSymbols.has(x.symbol)); 
-            const normalUp   = sorted.filter(x => !pinnedUpSymbols.has(x.symbol) && Number(x.change_pct) >= 0); 
-            const pinnedDown = sorted.filter(x => pinnedDownSymbols.has(x.symbol)); 
-            const normalDown = sorted.filter(x => !pinnedDownSymbols.has(x.symbol) && Number(x.change_pct) < 0); 
-            
-            const topGainers = [...pinnedUp,   ...normalUp  ]; 
-            const topLosers  = [...pinnedDown, ...normalDown]; 
-        
-            const buildTable = (list, side) => { 
-                const { col, dir } = dualSort[side]; 
-                const pinned = list.filter(x => side === 'up' ? pinnedUpSymbols.has(x.symbol) : pinnedDownSymbols.has(x.symbol)); 
-                const normal = list.filter(x => side === 'up' ? !pinnedUpSymbols.has(x.symbol) && Number(x.change_pct) >= 0 : !pinnedDownSymbols.has(x.symbol) && Number(x.change_pct) < 0); 
-            
-                const sortFn = (a, b) => { 
-                    let valA, valB; 
-                    if (col === '2m') { 
-                        valA = get2mChange(a.symbol, Number(a.last_price)) ?? -Infinity; 
-                        valB = get2mChange(b.symbol, Number(b.last_price)) ?? -Infinity; 
-                    } else { 
-                        valA = Number(a[col]); 
-                        valB = Number(b[col]); 
-                    } 
-                    return dir === 'desc' ? valB - valA : valA - valB; 
-                }; 
-            
-                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)]; 
-            
-                const icon = (c) => { 
-                    if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>'; 
-                    return dualSort[side].dir === 'asc' ? '↑' : '↓'; 
-                }; 
-                const thCls = (c) => dualSort[side].col === c ? 'style="color:#007acc;cursor:pointer"' : 'style="cursor:pointer"'; 
+            const warningUp   = sorted.filter(x => isActiveWarning(x, 'up'));
+            const pinnedUp    = sorted.filter(x => !isActiveWarning(x, 'up')   && isPinnedActive(x, 'up'));
+            const normalUp    = sorted.filter(x => !isActiveWarning(x, 'up')   && !isPinnedActive(x, 'up')   && Number(x.change_pct) >= 0);
 
-                let rows = ''; 
-                sortedList.forEach((item, i) => { 
-                    const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down'; 
-                    const state = symbolStates[item.symbol]; 
-                    let rowClass = ''; 
-                    if (state?.warning?.active) { 
-                        rowClass = state.warning.direction === 'up' ? 'warning-up' : 'warning-down'; 
-                    } 
-            
-                    // 置顶标识 
-                    const isPinned = side === 'up' ? pinnedUpSymbols.has(item.symbol) : pinnedDownSymbols.has(item.symbol); 
-                    const pinnedMark = isPinned ? ' 📌' : ''; 
-                    const rowStyle = isPinned ? ' style="border-left: 3px solid ' + (side === 'up' ? '#26a69a' : '#ef5350') + '"' : ''; 
-            
-                    // 2分钟涨跌 
-                    const change2m = get2mChange(item.symbol, Number(item.last_price)); 
-                    const change2mClass = change2m > 0 ? 'up' : (change2m < 0 ? 'down' : 'flat'); 
-                    const change2mStr = change2m !== null 
-                        ? `<span class="${change2mClass}">${change2m > 0 ? '+' : ''}${change2m.toFixed(2)}</span>` 
-                        : '-'; 
-            
-                    rows += ` 
-                        <tr class="${rowClass}"${rowStyle}> 
-                            <td style="text-align:center;color:#666">${i + 1}${pinnedMark}</td> 
-                            <td class="symbol">${item.symbol}</td> 
-                            <td class="${changeClass}">${formatNumber(item.last_price)}</td> 
-                            <td>${formatNumber(item.open_price)}</td> 
-                            <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td> 
-                            <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td> 
-                            <td>${formatVolume(item.total_volume)}</td> 
-                            <td>${change2mStr}</td> 
-                        </tr>`; 
-                }); 
-        
-                return ` 
-                    <table> 
-                        <thead> 
-                            <tr> 
-                                <th style="text-align:center">#</th> 
-                                <th style="text-align:left">代码</th> 
-                                <th onclick="handleDualSort('${side}','last_price')"   ${thCls('last_price')}>最新价 ${icon('last_price')}</th> 
-                                <th onclick="handleDualSort('${side}','open_price')"   ${thCls('open_price')}>开盘价 ${icon('open_price')}</th> 
-                                <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th> 
-                                <th onclick="handleDualSort('${side}','change_pct')"   ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th> 
-                                <th onclick="handleDualSort('${side}','total_volume')" ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th> 
-                                <th onclick="handleDualSort('${side}','2m')"           ${thCls('2m')}>2分涨跌 ${icon('2m')}</th> 
-                            </tr> 
-                        </thead> 
-                        <tbody>${rows}</tbody> 
-                    </table>`; 
-            }; 
-        
-            document.getElementById('content').innerHTML = ` 
-                <div class="dual-panel"> 
-                    <div class="panel panel-up"> 
-                        <div class="panel-title up">▲ 涨幅榜</div> 
-                        ${buildTable(topGainers, 'up')} 
-                    </div> 
-                    <div class="panel panel-down"> 
-                        <div class="panel-title down">▼ 跌幅榜</div> 
-                        ${buildTable(topLosers, 'down')} 
-                    </div> 
-                </div>`; 
+            const warningDown = sorted.filter(x => isActiveWarning(x, 'down'));
+            const pinnedDown  = sorted.filter(x => !isActiveWarning(x, 'down') && isPinnedActive(x, 'down'));
+            const normalDown  = sorted.filter(x => !isActiveWarning(x, 'down') && !isPinnedActive(x, 'down') && Number(x.change_pct) < 0);
+
+            const topGainers = [...warningUp,   ...pinnedUp,   ...normalUp  ];
+            const topLosers  = [...warningDown, ...pinnedDown, ...normalDown];
+
+            const buildTable = (list, side) => {
+                const { col, dir } = dualSort[side];
+
+                // buildTable 内部也按三层分组，保证排序不打乱优先级
+                const warning = list.filter(x => isActiveWarning(x, side));
+                const pinned  = list.filter(x => !isActiveWarning(x, side) && isPinnedActive(x, side));
+                const normal  = list.filter(x => !isActiveWarning(x, side) && !isPinnedActive(x, side) && (
+                    side === 'up' ? Number(x.change_pct) >= 0 : Number(x.change_pct) < 0
+                ));
+
+                const sortFn = (a, b) => {
+                    let valA, valB;
+                    if (col === '2m') {
+                        valA = get2mChange(a.symbol, Number(a.last_price)) ?? -Infinity;
+                        valB = get2mChange(b.symbol, Number(b.last_price)) ?? -Infinity;
+                    } else {
+                        valA = Number(a[col]);
+                        valB = Number(b[col]);
+                    }
+                    return dir === 'desc' ? valB - valA : valA - valB;
+                };
+
+                const sortedList = [...warning.sort(sortFn), ...pinned.sort(sortFn), ...normal.sort(sortFn)];
+
+                const icon = (c) => {
+                    if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>';
+                    return dualSort[side].dir === 'asc' ? '↑' : '↓';
+                };
+                const thCls = (c) => dualSort[side].col === c
+                    ? 'style="color:#007acc;cursor:pointer"'
+                    : 'style="cursor:pointer"';
+
+                let rows = '';
+                sortedList.forEach((item, i) => {
+                    const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down';
+
+                    const isWarning  = isActiveWarning(item, side);
+                    const isPinned   = isWarning || isPinnedActive(item, side);
+                    const pinnedMark = isWarning ? ' ⚡' : getPinnedMark(item, side);
+                    const borderColor = side === 'up' ? '#26a69a' : '#ef5350';
+                    const rowStyle = isPinned ? ` style="border-left:3px solid ${borderColor}"` : '';
+
+                    // 2分钟涨跌
+                    const change2m = get2mChange(item.symbol, Number(item.last_price));
+                    const change2mClass = change2m > 0 ? 'up' : (change2m < 0 ? 'down' : 'flat');
+                    const change2mStr = change2m !== null
+                        ? `<span class="${change2mClass}">${change2m > 0 ? '+' : ''}${change2m.toFixed(2)}</span>`
+                        : '-';
+
+                    rows += `
+                        <tr${rowStyle}>
+                            <td style="text-align:center;color:#666">${i + 1}${pinnedMark}</td>
+                            <td class="symbol">${item.symbol}</td>
+                            <td class="${changeClass}">${formatNumber(item.last_price)}</td>
+                            <td>${formatNumber(item.open_price)}</td>
+                            <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
+                            <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
+                            <td>${formatVolume(item.total_volume)}</td>
+                            <td>${change2mStr}</td>
+                        </tr>`;
+                });
+
+                return `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th style="text-align:center">#</th>
+                                <th style="text-align:left">代码</th>
+                                <th onclick="handleDualSort('${side}','last_price')"    ${thCls('last_price')}>最新价 ${icon('last_price')}</th>
+                                <th onclick="handleDualSort('${side}','open_price')"    ${thCls('open_price')}>开盘价 ${icon('open_price')}</th>
+                                <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th>
+                                <th onclick="handleDualSort('${side}','change_pct')"    ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th>
+                                <th onclick="handleDualSort('${side}','total_volume')"  ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th>
+                                <th onclick="handleDualSort('${side}','2m')"            ${thCls('2m')}>2分涨跌 ${icon('2m')}</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>`;
+            };
+
+            document.getElementById('content').innerHTML = `
+                <div class="dual-panel">
+                    <div class="panel panel-up">
+                        <div class="panel-title up">▲ 涨幅榜</div>
+                        ${buildTable(topGainers, 'up')}
+                    </div>
+                    <div class="panel panel-down">
+                        <div class="panel-title down">▼ 跌幅榜</div>
+                        ${buildTable(topLosers, 'down')}
+                    </div>
+                </div>`;
         }
 
         function renderFullTable(data = currentData) {
-            // Sort data
             const sorted = [...data].sort((a, b) => {
                 let valA = a[sortColumn];
                 let valB = b[sortColumn];
-
-                // Handle numeric conversion
                 if (sortColumn !== 'symbol') {
                     valA = Number(valA);
                     valB = Number(valB);
                 }
-
-                if (sortDirection === 'asc') {
-                    return valA > valB ? 1 : -1;
-                } else {
-                    return valA < valB ? 1 : -1;
-                }
+                if (sortDirection === 'asc') return valA > valB ? 1 : -1;
+                return valA < valB ? 1 : -1;
             });
 
             const getSortIcon = (col) => {
@@ -646,44 +662,35 @@
                 return sortDirection === 'asc' ? '↑' : '↓';
             };
 
-            const getHeaderClass = (col) => {
-                return sortColumn === col ? 'active' : '';
-            };
+            const getHeaderClass = (col) => sortColumn === col ? 'active' : '';
 
             let html = `
                 <table>
                     <thead>
                         <tr>
                             <th>排名</th>
-                            <th onclick="handleSort('symbol')" class="${getHeaderClass('symbol')}">代码 <span class="sort-icon">${getSortIcon('symbol')}</span></th>
-                            <th onclick="handleSort('last_price')" class="${getHeaderClass('last_price')}">最新价 <span class="sort-icon">${getSortIcon('last_price')}</span></th>
-                            <th onclick="handleSort('open_price')" class="${getHeaderClass('open_price')}">开盘价 <span class="sort-icon">${getSortIcon('open_price')}</span></th>
-                            <th onclick="handleSort('change_amount')" class="${getHeaderClass('change_amount')}">涨跌额 <span class="sort-icon">${getSortIcon('change_amount')}</span></th>
-                            <th onclick="handleSort('change_pct')" class="${getHeaderClass('change_pct')}">涨跌幅% <span class="sort-icon">${getSortIcon('change_pct')}</span></th>
-                            <th onclick="handleSort('total_volume')" class="${getHeaderClass('total_volume')}">成交量 <span class="sort-icon">${getSortIcon('total_volume')}</span></th>
-                            <th>1分涨跌</th> 
-                            <th>2分涨跌</th> 
+                            <th onclick="handleSort('symbol')"         class="${getHeaderClass('symbol')}">代码 <span class="sort-icon">${getSortIcon('symbol')}</span></th>
+                            <th onclick="handleSort('last_price')"     class="${getHeaderClass('last_price')}">最新价 <span class="sort-icon">${getSortIcon('last_price')}</span></th>
+                            <th onclick="handleSort('open_price')"     class="${getHeaderClass('open_price')}">开盘价 <span class="sort-icon">${getSortIcon('open_price')}</span></th>
+                            <th onclick="handleSort('change_amount')"  class="${getHeaderClass('change_amount')}">涨跌额 <span class="sort-icon">${getSortIcon('change_amount')}</span></th>
+                            <th onclick="handleSort('change_pct')"     class="${getHeaderClass('change_pct')}">涨跌幅% <span class="sort-icon">${getSortIcon('change_pct')}</span></th>
+                            <th onclick="handleSort('total_volume')"   class="${getHeaderClass('total_volume')}">成交量 <span class="sort-icon">${getSortIcon('total_volume')}</span></th>
+                            <th>1分涨跌</th>
+                            <th>2分涨跌</th>
                             <th onclick="handleSort('price_change_3m')" class="${getHeaderClass('price_change_3m')}">3分涨跌 <span class="sort-icon">${getSortIcon('price_change_3m')}</span></th>
                             <th class="hide-mobile ${getHeaderClass('avg_vol_10d')}" onclick="handleSort('avg_vol_10d')">10日均量 <span class="sort-icon">${getSortIcon('avg_vol_10d')}</span></th>
                             <th class="hide-mobile">量比</th>
                         </tr>
                     </thead>
-                    <tbody>
-            `;
+                    <tbody>`;
 
             sorted.forEach((item, index) => {
-                const changeClass = Number(item.change_amount) > 0 ? 'up' : (Number(item.change_amount) < 0 ? 'down' : 'flat');
+                const changeClass  = Number(item.change_amount)    > 0 ? 'up' : (Number(item.change_amount)    < 0 ? 'down' : 'flat');
                 const change3mClass = Number(item.price_change_3m) > 0 ? 'up' : (Number(item.price_change_3m) < 0 ? 'down' : 'flat');
-                const volumeRatio = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-';
-                
-                const state = symbolStates[item.symbol];
-                let rowClass = '';
-                if (state && state.warning && state.warning.active) {
-                    rowClass = state.warning.direction === 'up' ? 'warning-up' : 'warning-down';
-                }
-                
+                const volumeRatio  = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-';
+
                 html += `
-                    <tr class="${rowClass}">
+                    <tr>
                         <td>${index + 1}</td>
                         <td class="symbol">${item.symbol}</td>
                         <td class="${changeClass}">${formatNumber(item.last_price)}</td>
@@ -691,23 +698,22 @@
                         <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
                         <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
                         <td>${formatVolume(item.total_volume)}</td>
-                        <td>${(() => { 
-                            const c = get1mChange(item.symbol, Number(item.last_price)); 
-                            if (c === null) return '-'; 
-                            const cls = c > 0 ? 'up' : (c < 0 ? 'down' : 'flat'); 
-                            return `<span class="${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>`; 
-                        })()}</td> 
-                        <td>${(() => { 
-                            const c = get2mChange(item.symbol, Number(item.last_price)); 
-                            if (c === null) return '-'; 
-                            const cls = c > 0 ? 'up' : (c < 0 ? 'down' : 'flat'); 
-                            return `<span class="${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>`; 
-                        })()}</td> 
+                        <td>${(() => {
+                            const c = get1mChange(item.symbol, Number(item.last_price));
+                            if (c === null) return '-';
+                            const cls = c > 0 ? 'up' : (c < 0 ? 'down' : 'flat');
+                            return `<span class="${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>`;
+                        })()}</td>
+                        <td>${(() => {
+                            const c = get2mChange(item.symbol, Number(item.last_price));
+                            if (c === null) return '-';
+                            const cls = c > 0 ? 'up' : (c < 0 ? 'down' : 'flat');
+                            return `<span class="${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>`;
+                        })()}</td>
                         <td class="${change3mClass}">${item.price_change_3m > 0 ? '+' : ''}${formatNumber(item.price_change_3m)}</td>
                         <td class="hide-mobile">${formatVolume(item.avg_vol_10d)}</td>
                         <td class="hide-mobile">${volumeRatio}x</td>
-                    </tr>
-                `;
+                    </tr>`;
             });
 
             html += `</tbody></table>`;
@@ -726,7 +732,6 @@
         // Initialize
         fetchData();
 
-        // Timer loop
         setInterval(() => {
             countdown--;
             if (countdown <= 0) {
@@ -735,7 +740,6 @@
                 updateTimerDisplay();
             }
         }, 1000);
-
     </script>
 </body>
 </html>
