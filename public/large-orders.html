@@ -106,7 +106,6 @@
         let fetchTimer;
         let displayedStocks = []; // 前端状态队列，保存已渲染的 symbol
         let expandedSymbols = new Set(); // 记录展开状态的 symbol
-        const hotMemory = new Map(); // 记录高频异动状态：symbol -> lastHotTime
         
         function toggleDetails(symbol) {
             const childRow = document.getElementById('child-row-' + symbol);
@@ -215,16 +214,7 @@
             // 计算净量并排序（按最新异动时间降序）
             const result = Object.values(groups).map(g => {
                 g.net_vol = g.bid_vol - g.ask_vol;
-                
-                // 粘性高亮逻辑：如果 1 分钟内出现超过 1 次，更新最后高频时间
-                if (g.recentCount > 1) {
-                    hotMemory.set(g.symbol, now.getTime());
-                }
-                
-                // 只要在最近 5 分钟内曾经高频过，就保持高亮
-                const lastHotAt = hotMemory.get(g.symbol) || 0;
-                g.isHot = (now.getTime() - lastHotAt) < 5 * 60 * 1000;
-                
+                g.isHot = g.recentCount > 1; // 1分钟内出现超过1次即为热点
                 // 对子订单按时间降序
                 g.orders.sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
                 return g;

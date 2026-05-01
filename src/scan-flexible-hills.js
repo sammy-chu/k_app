@@ -16,156 +16,149 @@ const dbConfig = {
  * @returns {Promise<Object>} - 结果对象 { date, count, data }
  */
 async function getFlexibleHills(pool, dateStr) {
-  const client = await pool.connect();
-  try {
-    await client.query('SET statement_timeout = 120000'); // 2 minutes timeout for heavy query
-    await client.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
+  await pool.query('SET search_path TO ' + (process.env.PGSCHEMA || 'market_data'));
 
-    // 1. 获取日期
-    let targetDate = dateStr;
+  // 1. 获取日期
+  let targetDate = dateStr;
+  if (!targetDate) {
+    const dateRes = await pool.query(`
+      SELECT MAX(DATE(received_at)) as last_date 
+      FROM tos_trades 
+    `);
+    targetDate = dateRes.rows[0].last_date;
     if (!targetDate) {
-      const dateRes = await client.query(`
-        SELECT MAX(time_period::date) as last_date
-        FROM kline_1m
-        WHERE time_period >= NOW() - INTERVAL '7 days'
-      `);
-      targetDate = dateRes.rows[0].last_date;
-      if (!targetDate) {
-         targetDate = new Date().toISOString().split('T')[0];
-      }
+       // Fallback to current date if no data
+       targetDate = new Date().toISOString().split('T')[0];
     }
+  }
 
-    // 2. 从 kline_1m 读取分钟级数据，在 JS 层检测山丘
-    const sql = `
-      SELECT
+  // 2. 执行查询
+  // 使用 15分钟 前后窗口以捕捉更完整的山丘
+  const sql = `
+    WITH raw_data AS (
+      SELECT 
+        t.symbol,
+        date_trunc('minute', t.received_at) AS bucket,
+        SUM(t.size) as volume,
+        AVG(t.price) as avg_price
+      FROM tos_trades t
+      JOIN user_symbols u ON t.symbol = u.symbol
+      WHERE 
+        DATE(t.received_at) = $1::date
+      GROUP BY 1, 2
+    ),
+    smoothed AS (
+       SELECT
+         symbol,
+         bucket,
+         volume,
+         avg_price,
+         AVG(volume) OVER (PARTITION BY symbol ORDER BY bucket ROWS BETWEEN 20 PRECEDING AND 1 PRECEDING) as baseline
+       FROM raw_data
+    ),
+    peaks_raw AS (
+      SELECT 
         symbol,
-        time_period AS bucket,
+        bucket,
         volume,
-        close AS price
-      FROM kline_1m
-      WHERE
-        time_period >= $1::date
-        AND time_period < ($1::date + INTERVAL '1 day')
-      ORDER BY symbol, time_period
-    `;
+        avg_price,
+        baseline,
+        LAG(volume, 1) OVER w as v_m1,
+        LAG(volume, 2) OVER w as v_m2
+      FROM smoothed
+      WINDOW w AS (PARTITION BY symbol ORDER BY bucket)
+    ),
+    peaks AS (
+      SELECT * FROM peaks_raw
+      WHERE 
+        volume > 1000 
+        AND volume * avg_price > 50000 
+        AND volume > baseline * 3
+        AND volume > v_m1 AND volume > v_m2 
+    ),
+    context AS (
+      SELECT
+         p.symbol,
+         p.bucket as peak_time,
+         p.volume as peak_volume,
+         p.baseline,
+         (
+           SELECT json_agg(json_build_object('t', r.bucket, 'v', r.volume))
+           FROM raw_data r
+           WHERE r.symbol = p.symbol 
+             AND r.bucket >= p.bucket - INTERVAL '15 minutes'
+             AND r.bucket <= p.bucket + INTERVAL '15 minutes'
+         ) as hill_data
+      FROM peaks p
+    )
+    SELECT * FROM context
+    WHERE json_array_length(hill_data) >= 5
+  `;
 
-    const { rows } = await client.query(sql, [targetDate]);
+  const { rows } = await pool.query(sql, [targetDate]);
 
-    if (rows.length === 0) {
-      return { date: targetDate, count: 0, data: [] };
+  // 3. 应用层处理
+  const results = [];
+  
+  for (const row of rows) {
+    if (!row.hill_data) continue;
+    
+    const data = row.hill_data.sort((a, b) => new Date(a.t) - new Date(b.t));
+    const peakVol = row.peak_volume;
+    const peakIndex = data.findIndex(d => new Date(d.t).getTime() === new Date(row.peak_time).getTime());
+    
+    if (peakIndex === -1) continue;
+
+    let leftIndex = peakIndex;
+    while (leftIndex > 0) {
+      if (data[leftIndex-1].v < peakVol * 0.3 || data[leftIndex-1].v < row.baseline) {
+        leftIndex--; 
+        break; 
+      }
+      if (data[leftIndex-1].v > data[leftIndex].v) break;
+      leftIndex--;
     }
 
-    // Step 2: 在 JS 层按 symbol 分组，检测山丘形态
-    const bySymbol = {};
-    for (const row of rows) {
-      if (!bySymbol[row.symbol]) bySymbol[row.symbol] = [];
-      bySymbol[row.symbol].push({
-        bucket: row.bucket,
-        volume: Number(row.volume),
-        avg_price: Number(row.price)
+    let rightIndex = peakIndex;
+    while (rightIndex < data.length - 1) {
+      if (data[rightIndex+1].v < peakVol * 0.3 || data[rightIndex+1].v < row.baseline) {
+        rightIndex++; 
+        break;
+      }
+      if (data[rightIndex+1].v > data[rightIndex].v) break;
+      rightIndex++;
+    }
+
+    const duration = rightIndex - leftIndex + 1;
+    
+    if (duration >= 4) {
+      let totalVol = 0;
+      for(let i=leftIndex; i<=rightIndex; i++) totalVol += data[i].v;
+      const fullness = totalVol / (peakVol * duration);
+
+      results.push({
+        symbol: row.symbol,
+        peakTime: row.peak_time,
+        startTime: data[leftIndex].t, // Added start time
+        endTime: data[rightIndex].t,   // Added end time
+        peakVol: peakVol,
+        baseline: row.baseline,
+        ratio: peakVol / (row.baseline || 1),
+        duration: duration,
+        fullness: fullness,
+        shape: data.slice(leftIndex, rightIndex + 1).map(d => d.v)
       });
     }
-
-    const results = [];
-
-    for (const [symbol, bars] of Object.entries(bySymbol)) {
-      if (bars.length < 5) continue;
-
-      // 计算 baseline（前20根均值）和 LAG
-      for (let i = 0; i < bars.length; i++) {
-        const start = Math.max(0, i - 20);
-        const end = i;
-        if (end > start) {
-          let sum = 0;
-          for (let j = start; j < end; j++) sum += bars[j].volume;
-          bars[i].baseline = sum / (end - start);
-        } else {
-          bars[i].baseline = 0;
-        }
-      }
-
-      // 找 peaks
-      for (let i = 2; i < bars.length; i++) {
-        const b = bars[i];
-        if (b.volume <= 1000) continue;
-        if (b.volume * b.avg_price <= 50000) continue;
-        if (b.baseline <= 0 || b.volume <= b.baseline * 3) continue;
-        if (b.volume <= bars[i-1].volume || b.volume <= bars[i-2].volume) continue;
-
-        // 找到 peak，提取 ±15 分钟上下文
-        const peakTime = b.bucket;
-        const peakVol = b.volume;
-        const baseline = b.baseline;
-
-        // 收集 ±15 分钟窗口
-        const contextBars = [];
-        for (let j = 0; j < bars.length; j++) {
-          const diff = (new Date(bars[j].bucket) - new Date(peakTime)) / 60000;
-          if (diff >= -15 && diff <= 15) {
-            contextBars.push({ t: bars[j].bucket, v: bars[j].volume });
-          }
-        }
-
-        if (contextBars.length < 5) continue;
-
-        // 山丘形态检测（与原逻辑一致）
-        const peakIndex = contextBars.findIndex(d => new Date(d.t).getTime() === new Date(peakTime).getTime());
-        if (peakIndex === -1) continue;
-
-        let leftIndex = peakIndex;
-        while (leftIndex > 0) {
-          if (contextBars[leftIndex-1].v < peakVol * 0.3 || contextBars[leftIndex-1].v < baseline) {
-            leftIndex--;
-            break;
-          }
-          if (contextBars[leftIndex-1].v > contextBars[leftIndex].v) break;
-          leftIndex--;
-        }
-
-        let rightIndex = peakIndex;
-        while (rightIndex < contextBars.length - 1) {
-          if (contextBars[rightIndex+1].v < peakVol * 0.3 || contextBars[rightIndex+1].v < baseline) {
-            rightIndex++;
-            break;
-          }
-          if (contextBars[rightIndex+1].v > contextBars[rightIndex].v) break;
-          rightIndex++;
-        }
-
-        const duration = rightIndex - leftIndex + 1;
-        if (duration >= 4) {
-          let totalVol = 0;
-          for (let k = leftIndex; k <= rightIndex; k++) totalVol += contextBars[k].v;
-          const fullness = totalVol / (peakVol * duration);
-
-          results.push({
-            symbol,
-            peakTime,
-            startTime: contextBars[leftIndex].t,
-            endTime: contextBars[rightIndex].t,
-            peakVol,
-            baseline,
-            ratio: peakVol / (baseline || 1),
-            duration,
-            fullness,
-            shape: contextBars.slice(leftIndex, rightIndex + 1).map(d => d.v)
-          });
-        }
-      }
-    }
-
-    // Sort by peakTime descending
-    results.sort((a, b) => new Date(b.peakTime) - new Date(a.peakTime));
-
-    return {
-      date: targetDate,
-      count: results.length,
-      data: results
-    };
-  } finally {
-    await client.query('SET statement_timeout = 0').catch(e => console.error(e));
-    client.release();
   }
+
+  // Sort by peakTime descending (latest first)
+  results.sort((a, b) => new Date(b.peakTime) - new Date(a.peakTime));
+  
+  return {
+    date: targetDate,
+    count: results.length,
+    data: results
+  };
 }
 
 // 独立运行时执行
