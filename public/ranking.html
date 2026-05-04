@@ -186,6 +186,14 @@
             width: 80px;
         }
 
+        .warning-up {
+            background-color: rgba(38, 166, 154, 0.2) !important;
+        }
+
+        .warning-down {
+            background-color: rgba(239, 83, 80, 0.2) !important;
+        }
+
         .dual-panel {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -538,27 +546,24 @@
                 return;
             }
 
-            // dual 模式：三层优先级 预警置顶 > 5%置顶 > 普通
+            // dual 模式：只保留 5% 置顶，变色预警不再置顶
             const sorted = [...filteredData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
 
-            const warningUp   = sorted.filter(x => isActiveWarning(x, 'up'));
-            const pinnedUp    = sorted.filter(x => !isActiveWarning(x, 'up')   && isPinnedActive(x, 'up'));
-            const normalUp    = sorted.filter(x => !isActiveWarning(x, 'up')   && !isPinnedActive(x, 'up')   && Number(x.change_pct) >= 0);
+            const pinnedUp    = sorted.filter(x => isPinnedActive(x, 'up'));
+            const normalUp    = sorted.filter(x => !isPinnedActive(x, 'up')   && Number(x.change_pct) >= 0);
 
-            const warningDown = sorted.filter(x => isActiveWarning(x, 'down'));
-            const pinnedDown  = sorted.filter(x => !isActiveWarning(x, 'down') && isPinnedActive(x, 'down'));
-            const normalDown  = sorted.filter(x => !isActiveWarning(x, 'down') && !isPinnedActive(x, 'down') && Number(x.change_pct) < 0);
+            const pinnedDown  = sorted.filter(x => isPinnedActive(x, 'down'));
+            const normalDown  = sorted.filter(x => !isPinnedActive(x, 'down') && Number(x.change_pct) < 0);
 
-            const topGainers = [...warningUp,   ...pinnedUp,   ...normalUp  ];
-            const topLosers  = [...warningDown, ...pinnedDown, ...normalDown];
+            const topGainers = [...pinnedUp,   ...normalUp  ];
+            const topLosers  = [...pinnedDown, ...normalDown];
 
             const buildTable = (list, side) => {
                 const { col, dir } = dualSort[side];
 
-                // buildTable 内部也按三层分组，保证排序不打乱优先级
-                const warning = list.filter(x => isActiveWarning(x, side));
-                const pinned  = list.filter(x => !isActiveWarning(x, side) && isPinnedActive(x, side));
-                const normal  = list.filter(x => !isActiveWarning(x, side) && !isPinnedActive(x, side) && (
+                // buildTable 内部按两层分组：置顶 > 普通
+                const pinned  = list.filter(x => isPinnedActive(x, side));
+                const normal  = list.filter(x => !isPinnedActive(x, side) && (
                     side === 'up' ? Number(x.change_pct) >= 0 : Number(x.change_pct) < 0
                 ));
 
@@ -574,7 +579,7 @@
                     return dir === 'desc' ? valB - valA : valA - valB;
                 };
 
-                const sortedList = [...warning.sort(sortFn), ...pinned.sort(sortFn), ...normal.sort(sortFn)];
+                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)];
 
                 const icon = (c) => {
                     if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>';
@@ -588,11 +593,15 @@
                 sortedList.forEach((item, i) => {
                     const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down';
 
-                    const isWarning  = isActiveWarning(item, side);
-                    const isPinned   = isWarning || isPinnedActive(item, side);
-                    const pinnedMark = isWarning ? ' ⚡' : getPinnedMark(item, side);
+                    const isWarning   = isActiveWarning(item, side);
+                    const isPinned    = isPinnedActive(item, side);
+                    const pinnedMark  = getPinnedMark(item, side); // ⚡ 去掉，只用 📌 / ⏱
                     const borderColor = side === 'up' ? '#26a69a' : '#ef5350';
-                    const rowStyle = isPinned ? ` style="border-left:3px solid ${borderColor}"` : '';
+                    const leftBorder  = isPinned ? `border-left:3px solid ${borderColor};` : '';
+                    const warningBg   = isWarning 
+                        ? (side === 'up' ? 'background-color:rgba(38,166,154,0.2);' : 'background-color:rgba(239,83,80,0.2);') 
+                        : '';
+                    const rowStyle = (leftBorder || warningBg) ? ` style="${leftBorder}${warningBg}"` : '';
 
                     // 2分钟涨跌
                     const change2m = get2mChange(item.symbol, Number(item.last_price));
