@@ -620,16 +620,15 @@ app.get('/api/large-orders-screener', async (req, res) => {
         SELECT DISTINCT ON (stock_code, side)
             stock_code AS symbol, side, level, price AS order_price, volume AS order_volume, detected_at
         FROM market_data.l2_large_orders_bl
-        WHERE detected_at >= NOW() - ($1 || ' minutes')::interval
+        WHERE detected_at >= NOW() - ($1 * INTERVAL '1 minute')
           AND volume >= $2
         ORDER BY stock_code, side, detected_at DESC
       )
       SELECT o.symbol, o.side, o.level, o.order_price, o.order_volume, o.detected_at,
              d.open_price, d.close_price, d.total_volume
       FROM recent_large_orders o
-      JOIN market_data.daily_summary d ON o.symbol = d.symbol
-      WHERE d.trade_date = CURRENT_DATE
-        AND NOT (o.symbol = ANY($3::text[]))
+      JOIN market_data.daily_summary d ON o.symbol = d.symbol AND d.trade_date = CURRENT_DATE
+      WHERE NOT (o.symbol = ANY($3::text[]))
       ORDER BY o.detected_at DESC
       LIMIT 100
     `;
@@ -639,11 +638,9 @@ app.get('/api/large-orders-screener', async (req, res) => {
     // Inject latest price from memory cache (priceWindow)
     const result = rows.map(row => {
       const window = priceWindow.get(row.symbol);
-      let currentPrice = row.close_price; // Fallback to close_price
-      if (window && window.length > 0) {
-        // Get the latest trade price from the memory window
-        currentPrice = window[window.length - 1].price;
-      }
+      const currentPrice = (window && window.length > 0)
+        ? window[window.length - 1].price
+        : row.close_price;
       return { ...row, current_price: currentPrice };
     });
 
