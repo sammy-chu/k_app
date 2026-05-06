@@ -417,9 +417,9 @@ app.get('/api/l2-alert-history', async (req, res) => {
     let params = [limit];
     
     if (minutes > 0) {
-      timeCondition = `WHERE created_at >= NOW() - INTERVAL '${minutes} minutes'`;
+      timeCondition = `WHERE created_at >= NOW() - INTERVAL '${minutes} minutes' AND level <= 3`;
     } else {
-      timeCondition = `WHERE created_at >= CURRENT_DATE`;
+      timeCondition = `WHERE created_at >= CURRENT_DATE AND level <= 3`;
     }
 
     const sql = `
