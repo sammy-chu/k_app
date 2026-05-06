@@ -405,6 +405,42 @@ app.get('/api/ohlcv', async (req, res) => {
   }
 });
 
+// === L2 Alert History API ===
+app.get('/api/l2-alert-history', async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit || 100), 500);
+    const minutes = Number(req.query.minutes || 0);
+    const market = String(req.query.market || 'BL');
+    const table = `market_data.l2_alert_history_${market.toLowerCase()}`;
+    
+    let timeCondition = '';
+    let params = [limit];
+    
+    if (minutes > 0) {
+      timeCondition = `WHERE created_at >= NOW() - INTERVAL '${minutes} minutes'`;
+    } else {
+      timeCondition = `WHERE created_at >= CURRENT_DATE`;
+    }
+
+    const sql = `
+      SELECT id, stock_code, alert_type, level, price, volume, price_ratio, 
+             trend_type, prev_price, prev_volume, prev_level,
+             price_change_abs, price_change_ratio, volume_change_abs, volume_change_ratio, 
+             level_delta, alert_message, created_at
+      FROM ${table}
+      ${timeCondition}
+      ORDER BY created_at DESC
+      LIMIT $1
+    `;
+    
+    const { rows } = await pool.query(sql, params);
+    res.json(rows);
+  } catch (e) {
+    console.error('l2-alert-history query failed:', e);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // === Settings API ===
 app.get('/api/settings', async (req, res) => {
   const settings = await config.getAllSettings();
@@ -1310,6 +1346,8 @@ ensureTables().then(() => {
   // 在静态服务与监听之前启动监控（或?listen 之后皆可?
   startAlertMonitor();
 });
+
+app.get('/l2-alerts', (req, res) => res.sendFile(path.join(__dirname, '../public/l2_alert_history.html')));
 
 const PORT = process.env.PORT || 8889;
 const HOST = process.env.HOST || '0.0.0.0';
