@@ -237,8 +237,10 @@
             <input type="number" id="filter-max-volume" placeholder="最大" style="width:70px" min="0" step="1">
         </div>
         <div class="filter-group">
-            <label>最小交易量</label>
-            <input type="number" id="filter-min-trade-vol" value="0" min="0" step="1" style="width:80px" oninput="debounceFetch()">
+            <label>交易量</label>
+            <input type="number" id="filter-min-trade-vol" placeholder="最小" style="width:70px" min="0" step="1">
+            <span style="color:#666">-</span>
+            <input type="number" id="filter-max-trade-vol" placeholder="最大" style="width:70px" min="0" step="1">
         </div>
         <div class="filter-group">
             <label>显示条数</label>
@@ -271,20 +273,11 @@
         stable:    { text: '持稳',     cls: 'tag-stable' },
     };
 
-    let debounceTimer = null;
-
-    function debounceFetch() {
-        clearTimeout(debounceTimer);
-        debounceTimer = setTimeout(() => fetchData(), 500);
-    }
-
     function buildApiUrl() {
         const mins  = document.getElementById('filter-time').value;
         const limit = document.getElementById('filter-limit').value;
-        const minTradeVol = document.getElementById('filter-min-trade-vol').value;
         const params = new URLSearchParams({ limit });
         if (mins !== '0') params.set('minutes', mins);
-        if (minTradeVol && minTradeVol !== '0') params.set('min_volume', minTradeVol);
         return `/api/l2-alert-history?${params}`;
     }
 
@@ -327,6 +320,8 @@
         const maxPrice = parseFloat(document.getElementById('filter-max-price').value);
         const minVolume = parseFloat(document.getElementById('filter-min-volume').value);
         const maxVolume = parseFloat(document.getElementById('filter-max-volume').value);
+        const minTradeVol = parseFloat(document.getElementById('filter-min-trade-vol').value);
+        const maxTradeVol = parseFloat(document.getElementById('filter-max-trade-vol').value);
 
         return data.filter(r => {
             if (side !== 'all' && r.alert_type !== side) return false;
@@ -341,6 +336,10 @@
             const volume = Number(r.volume) || 0;
             if (!isNaN(minVolume) && volume < minVolume) return false;
             if (!isNaN(maxVolume) && volume > maxVolume) return false;
+            
+            const tradeVol = Number(r.total_volume) || 0;
+            if (!isNaN(minTradeVol) && tradeVol < minTradeVol) return false;
+            if (!isNaN(maxTradeVol) && tradeVol > maxTradeVol) return false;
 
             return true;
         });
@@ -515,7 +514,7 @@
     }
 
     // 筛选变化时立即重渲染（不重新请求）
-    ['filter-side','filter-trend','filter-symbol','filter-ratio', 'filter-min-price', 'filter-max-price', 'filter-min-volume', 'filter-max-volume'].forEach(id => {
+    ['filter-side','filter-trend','filter-symbol','filter-ratio', 'filter-min-price', 'filter-max-price', 'filter-min-volume', 'filter-max-volume', 'filter-min-trade-vol', 'filter-max-trade-vol'].forEach(id => {
         document.getElementById(id).addEventListener('input',  () => { renderTable(); renderStats(); });
         document.getElementById(id).addEventListener('change', () => { renderTable(); renderStats(); });
     });
