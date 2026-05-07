@@ -417,19 +417,21 @@ app.get('/api/l2-alert-history', async (req, res) => {
     let params = [limit];
     
     if (minutes > 0) {
-      timeCondition = `WHERE created_at >= NOW() - INTERVAL '${minutes} minutes' AND level <= 3`;
+      timeCondition = `WHERE h.created_at >= NOW() - INTERVAL '${minutes} minutes' AND h.level <= 3`;
     } else {
-      timeCondition = `WHERE created_at >= CURRENT_DATE AND level <= 3`;
+      timeCondition = `WHERE h.created_at >= CURRENT_DATE AND h.level <= 3`;
     }
 
     const sql = `
-      SELECT id, stock_code, alert_type, level, price, volume, price_ratio, 
-             trend_type, prev_price, prev_volume, prev_level,
-             price_change_abs, price_change_ratio, volume_change_abs, volume_change_ratio, 
-             level_delta, alert_message, created_at
-      FROM ${table}
+      SELECT h.id, h.stock_code, h.alert_type, h.level, h.price, h.volume, h.price_ratio, 
+             h.trend_type, h.prev_price, h.prev_volume, h.prev_level,
+             h.price_change_abs, h.price_change_ratio, h.volume_change_abs, h.volume_change_ratio, 
+             h.level_delta, h.alert_message, h.created_at,
+             COALESCE(d.total_volume, 0) as total_volume
+      FROM ${table} h
+      LEFT JOIN market_data.daily_summary d ON h.stock_code = d.symbol AND d.trade_date = CURRENT_DATE
       ${timeCondition}
-      ORDER BY created_at DESC
+      ORDER BY h.created_at DESC
       LIMIT $1
     `;
     
