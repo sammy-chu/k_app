@@ -448,6 +448,7 @@
                 <th onclick="handleSort('level')"            class="${thCls('level')}">档位 ${thIcon('level')}</th>
                 <th onclick="handleSort('price')"            class="${thCls('price')}">挂单价 ${thIcon('price')}</th>
                 <th onclick="handleSort('volume')"           class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
+                <th onclick="handleSort('total_volume')"     class="${thCls('total_volume')}">交易量 ${thIcon('total_volume')}</th>
                 <th onclick="handleSort('price_ratio')"      class="${thCls('price_ratio')}">倍数 ${thIcon('price_ratio')}</th>
                 <th onclick="handleSort('trend_type')"       class="${thCls('trend_type')}">类型 ${thIcon('trend_type')}</th>
                 <th style="min-width:320px;text-align:left">变化详情</th>
@@ -473,6 +474,7 @@
                 <td><span class="level-badge">L${row.level}</span></td>
                 <td>${fmtPrice(row.price)}</td>
                 <td>${fmtVol(row.volume)}</td>
+                <td>${fmtVol(row.total_volume)}</td>
                 <td>${ratioEl}</td>
                 <td><span class="tag ${trend.cls}">${trend.text}</span></td>
                 <td class="change-cell" style="text-align:left">${buildChangeCell(row)}</td>
