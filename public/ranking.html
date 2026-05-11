@@ -194,82 +194,6 @@
             background-color: rgba(239, 83, 80, 0.2) !important;
         }
 
-        .triple-panel {
-            display: grid;
-            grid-template-columns: 1fr 1fr 1fr;
-            gap: 16px;
-            align-items: start;
-        }
-        .lo-panel {
-            background-color: #252525;
-            border-radius: 8px;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-        }
-        .lo-panel-title {
-            padding: 10px 15px;
-            font-size: 14px;
-            font-weight: 600;
-            background-color: #2a2a2a;
-            border-bottom: 1px solid #333;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            color: #faac30;
-            flex-shrink: 0;
-        }
-        .lo-panel-title .lo-meta { font-size: 11px; font-weight: 400; color: #666; }
-        
-        .lo-panel-content {
-            overflow-y: auto;
-            flex-grow: 1;
-        }
-        
-        /* 针对大单监控面板的滚动条样式 */
-        .lo-panel-content::-webkit-scrollbar {
-            width: 6px;
-        }
-        .lo-panel-content::-webkit-scrollbar-track {
-            background: #1a1a1a;
-        }
-        .lo-panel-content::-webkit-scrollbar-thumb {
-            background: #444;
-            border-radius: 3px;
-        }
-        .lo-panel-content::-webkit-scrollbar-thumb:hover {
-            background: #666;
-        }
-
-        .lo-panel table { width: 100%; border-collapse: collapse; }
-        .lo-panel th { 
-            background-color: #2f2f2f; 
-            color: #999; 
-            font-weight: 600; 
-            font-size: 12px; 
-            position: sticky; 
-            top: 0; 
-            z-index: 10;
-        }
-        .lo-panel th, .lo-panel td { padding: 8px 8px; font-size: 13px; text-align: right; border-bottom: 1px solid #333; }
-        .lo-panel th:first-child, .lo-panel td:first-child { text-align: left; padding-left: 12px; }
-        .lo-panel tr:last-child td { border-bottom: none; }
-        .lo-panel tr:hover { background-color: #2a2a2a; }
-        .lo-hot-row { background-color: rgba(255,152,0,0.08) !important; border-left: 3px solid #ff9800; }
-        .lo-hot-sym { color: #ffeb3b !important; }
-        .net-pos { color: #26a69a; font-weight: 600; }
-        .net-neg { color: #ef5350; font-weight: 600; }
-        .net-neu { color: #888; }
-        .lo-vol-dim { color: #777; }
-
-        @media (max-width: 1100px) {
-            .triple-panel { grid-template-columns: 1fr 1fr; }
-            .lo-panel { grid-column: 1 / -1; }
-        }
-        @media (max-width: 768px) {
-            .triple-panel { grid-template-columns: 1fr; }
-        }
-
         .dual-panel {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -327,6 +251,7 @@
             <a href="/hills">山丘形态</a>
             <a href="/hill-alerts">山丘放量</a>
             <a href="/ranking">涨跌排名</a>
+            <a href="/l2-alerts">L2大单</a>
         </div>
 
         <div class="header-bar">
@@ -347,6 +272,11 @@
                         <span style="color:#666">~</span>
                         <input type="number" id="max-price" class="filter-input" value="" step="0.01" placeholder="最高" oninput="renderTable()">
                     </div>
+                    <div class="filter-item">
+                        <label>
+                            <input type="checkbox" id="filter-5pct" onchange="renderTable()"> 涨跌超5%
+                        </label>
+                    </div>
                 </div>
                 <span class="refresh-info" id="refresh-timer">1s</span>
                 <button class="sort-btn" onclick="toggleView()">切换视图</button>
@@ -360,106 +290,12 @@
 
     <script>
         let currentData = [];
-        let largeOrderData = [];   // 大单原始数组，processData 聚合后的结果
-        let loFetchTimer = null;
         let symbolStates = {};
         let sortColumn = 'change_amount';
         let sortDirection = 'desc';
         let countdown = 1;
         let debounceTimer = null;
         let viewMode = 'dual';
-
-        function formatVol(num) {
-            if (num == null) return '-';
-            if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
-            if (num >= 1000)    return (num / 1000).toFixed(1) + 'K';
-            return String(num);
-        }
-
-        function processLargeOrders(rawData) {
-            const groups = {};
-            const now = Date.now();
-            const oneMinAgo = now - 60 * 1000;
-
-            rawData.forEach(row => {
-                const sym = row.symbol;
-                if (!groups[sym]) {
-                    groups[sym] = {
-                        symbol:            sym,
-                        current_price:     Number(row.current_price) || 0,
-                        total_volume:      Number(row.total_volume)  || 0,
-                        latest_detected_at: row.detected_at,
-                        bid_vol:           0,
-                        ask_vol:           0,
-                        recentCount:       0,
-                    };
-                }
-                const g = groups[sym];
-                if (new Date(row.detected_at) >= oneMinAgo) g.recentCount++;
-                if (new Date(row.detected_at) > new Date(g.latest_detected_at))
-                    g.latest_detected_at = row.detected_at;
-                const vol = Number(row.order_volume) || 0;
-                if (row.side === 'bid') g.bid_vol += vol;
-                if (row.side === 'ask') g.ask_vol += vol;
-            });
-
-            return Object.values(groups)
-                .map(g => ({ ...g, net_vol: g.bid_vol - g.ask_vol, isHot: g.recentCount > 1 }))
-                .sort((a, b) => new Date(b.latest_detected_at) - new Date(a.latest_detected_at))
-                .slice(0, 50);
-        }
-
-        function renderLargeOrderPanel(data) {
-            const rows = data.map(g => {
-                const netClass  = g.net_vol > 0 ? 'net-pos' : (g.net_vol < 0 ? 'net-neg' : 'net-neu');
-                const netPrefix = g.net_vol > 0 ? '+' : '';
-                const hotRow    = g.isHot ? 'lo-hot-row' : '';
-                const hotSym    = g.isHot ? 'lo-hot-sym' : '';
-                return `
-                    <tr class="${hotRow}">
-                        <td class="symbol ${hotSym}">${g.symbol}</td>
-                        <td>${g.current_price.toFixed(2)}</td>
-                        <td class="lo-vol-dim">${formatVol(g.total_volume)}</td>
-                        <td style="color:#26a69a">${g.bid_vol > 0 ? g.bid_vol.toLocaleString() : '—'}</td>
-                        <td style="color:#ef5350">${g.ask_vol > 0 ? g.ask_vol.toLocaleString() : '—'}</td>
-                        <td class="${netClass}">${g.net_vol !== 0 ? netPrefix + g.net_vol.toLocaleString() : '0'}</td>
-                    </tr>`;
-            }).join('');
-
-            return `
-                <div class="lo-panel">
-                    <div class="lo-panel-title">
-                        ⬡ 大单监控
-                        <span class="lo-meta">60分钟内 · 按最新异动</span>
-                    </div>
-                    <div class="lo-panel-content">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>代码</th>
-                                    <th>最新价</th>
-                                    <th>日成交量</th>
-                                    <th style="color:#26a69a">买大单</th>
-                                    <th style="color:#ef5350">卖大单</th>
-                                    <th>净差额</th>
-                                </tr>
-                            </thead>
-                            <tbody>${rows || '<tr><td colspan="6" style="text-align:center;color:#555;padding:20px">暂无大单数据</td></tr>'}</tbody>
-                        </table>
-                    </div>
-                </div>`;
-        }
-
-        async function fetchLargeOrders() {
-            try {
-                const res = await fetch('/api/large-orders-screener?min_order_volume=1000&time_window_mins=60');
-                if (!res.ok) return;
-                const raw = await res.json();
-                largeOrderData = processLargeOrders(raw);
-            } catch(e) {
-                console.error('large order fetch error:', e);
-            }
-        }
 
         // 双列各自的排序状态
         let dualSort = {
@@ -656,10 +492,7 @@
             isFetching = true;
             try {
                 const minVol = document.getElementById('min-volume').value;
-                const [res] = await Promise.all([
-                    fetch(`/api/ranking?min_volume=${minVol}`),
-                    fetchLargeOrders()
-                ]);
+                const res = await fetch(`/api/ranking?min_volume=${minVol}`);
                 if (!res.ok) throw new Error('Network response was not ok');
                 currentData = await res.json();
                 processWarnings(currentData);
@@ -698,10 +531,13 @@
             const minPrice    = parseFloat(document.getElementById('min-price').value)    || 0;
             const maxPrice    = parseFloat(document.getElementById('max-price').value)    || Infinity;
             const min2mChange = parseFloat(document.getElementById('min-2m-change').value) || 0;
+            const filter5Pct  = document.getElementById('filter-5pct').checked;
 
             const filteredData = currentData.filter(item => {
                 const p = Number(item.last_price);
+                const pct = Math.abs(Number(item.change_pct));
                 if (p < minPrice || p > maxPrice) return false;
+                if (filter5Pct && pct <= 5) return false;
                 if (min2mChange > 0) {
                     const c2m = get2mChange(item.symbol, Number(item.last_price));
                     if (c2m === null || Math.abs(c2m) < min2mChange) return false;
@@ -815,7 +651,7 @@
             };
 
             document.getElementById('content').innerHTML = `
-                <div class="triple-panel">
+                <div class="dual-panel">
                     <div class="panel panel-up">
                         <div class="panel-title up">▲ 涨幅榜</div>
                         ${buildTable(topGainers, 'up')}
@@ -824,7 +660,6 @@
                         <div class="panel-title down">▼ 跌幅榜</div>
                         ${buildTable(topLosers, 'down')}
                     </div>
-                    ${renderLargeOrderPanel(largeOrderData)}
                 </div>`;
         }
 

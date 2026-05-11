@@ -34,9 +34,6 @@
             color: #ffeb3b !important;
             text-shadow: 0 0 5px rgba(255, 235, 59, 0.4);
         }
-
-        /* 隐藏移动端不必要的列，或定义成交量的格式 */
-        .vol-value { font-family: monospace; }
     </style>
 </head>
 <body>
@@ -187,13 +184,7 @@
 
         function processData(rawData) {
             const groups = {};
-            
-            let maxTime = 0;
-            rawData.forEach(row => {
-                const t = new Date(row.detected_at).getTime();
-                if (t > maxTime) maxTime = t;
-            });
-            const now = maxTime > 0 ? new Date(maxTime) : new Date();
+            const now = new Date();
             const oneMinAgo = new Date(now.getTime() - 60 * 1000);
             
             rawData.forEach(row => {
@@ -247,13 +238,6 @@
             return result;
         }
 
-        function formatVolume(num) {
-            if (num === null || num === undefined) return '-';
-            if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
-            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-            return num;
-        }
-
         function renderTable(rawData) {
             const data = processData(rawData);
             const tbody = document.getElementById('table-body');
@@ -297,7 +281,7 @@
                         <td style="color:${sideColor};">${sideText}</td>
                         <td>L${o.level}</td>
                         <td>${Number(o.order_price).toFixed(2)}</td>
-                        <td>${formatVolume(o.order_volume)}</td>
+                        <td>${o.order_volume}</td>
                         <td style="color:#888;">${timeStr}</td>
                     </tr>`;
                 });
@@ -321,13 +305,13 @@
                         parentTr.dataset.price = newPrice;
                     }
                     
-                    parentTr.querySelector('.td-vol').innerText = formatVolume(group.total_volume);
-                    parentTr.querySelector('.td-bid').innerText = formatVolume(group.bid_vol);
-                    parentTr.querySelector('.td-ask').innerText = formatVolume(group.ask_vol);
+                    parentTr.querySelector('.td-vol').innerText = group.total_volume;
+                    parentTr.querySelector('.td-bid').innerText = group.bid_vol;
+                    parentTr.querySelector('.td-ask').innerText = group.ask_vol;
                     
                     const netTd = parentTr.querySelector('.td-net');
                     netTd.className = `td-net ${netClass}`;
-                    netTd.innerText = netPrefix + formatVolume(group.net_vol);
+                    netTd.innerText = netPrefix + group.net_vol;
 
                     // 更新子表内容
                     childTr.querySelector('td').innerHTML = childTableHtml;
@@ -355,10 +339,10 @@
                             <span class="sym-text ${symbolHotClass}">${sym}</span>
                         </td>
                         <td class="td-price">${group.current_price.toFixed(2)}</td>
-                        <td class="td-vol">${formatVolume(group.total_volume)}</td>
-                        <td class="td-bid" style="color:#26a69a;">${formatVolume(group.bid_vol)}</td>
-                        <td class="td-ask" style="color:#ef5350;">${formatVolume(group.ask_vol)}</td>
-                        <td class="td-net ${netClass}">${netPrefix}${formatVolume(group.net_vol)}</td>
+                        <td class="td-vol">${group.total_volume}</td>
+                        <td class="td-bid" style="color:#26a69a;">${group.bid_vol}</td>
+                        <td class="td-ask" style="color:#ef5350;">${group.ask_vol}</td>
+                        <td class="td-net ${netClass}">${netPrefix}${group.net_vol}</td>
                     `;
                     
                     childTr = document.createElement('tr');
