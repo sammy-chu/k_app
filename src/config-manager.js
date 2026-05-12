@@ -56,9 +56,11 @@ class ConfigManager {
    * @returns {Promise<object>} - Result object { success: true, message: '...' }
    */
   async update(key, newValue, changedBy = 'system') {
+    // [FIX-E] update 方法事务必须使用同一个 client
+    const client = await this.pool.connect();
     try {
       // 1. Fetch metadata for validation
-      const metaRes = await this.pool.query(
+      const metaRes = await client.query(
         'SELECT value, value_type, min_value, max_value FROM app_settings WHERE key = $1',
         [key]
       );
@@ -101,21 +103,21 @@ class ConfigManager {
       }
 
       // 3. Update DB
-      await this.pool.query('BEGIN');
+      await client.query('BEGIN');
 
-      await this.pool.query(
+      await client.query(
         'UPDATE app_settings SET value = $1, updated_at = now() WHERE key = $2',
         [String(validatedValue), key]
       );
 
       // 4. Log change
-      await this.pool.query(
+      await client.query(
         `INSERT INTO settings_change_log (key, old_value, new_value, changed_by)
          VALUES ($1, $2, $3, $4)`,
         [key, String(oldValue), String(validatedValue), changedBy]
       );
 
-      await this.pool.query('COMMIT');
+      await client.query('COMMIT');
 
       // 5. Update Cache immediately
       this.cache.set(key, {
@@ -126,9 +128,11 @@ class ConfigManager {
       return { success: true, message: 'Setting updated successfully.' };
 
     } catch (err) {
-      await this.pool.query('ROLLBACK');
+      await client.query('ROLLBACK').catch(() => {});
       console.error(`ConfigManager: Update failed for ${key}`, err);
       throw err;
+    } finally {
+      client.release();
     }
   }
 
