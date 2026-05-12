@@ -147,19 +147,7 @@
             color: #ff6b6b;
         }
 
-        .sort-icon {
-            font-size: 10px;
-            margin-left: 5px;
-            color: #666;
-        }
 
-        th.active {
-            color: #007acc;
-        }
-
-        th.active .sort-icon {
-            color: #007acc;
-        }
 
         .filters {
             display: flex;
@@ -278,24 +266,20 @@
                         </label>
                     </div>
                 </div>
-                <span class="refresh-info" id="refresh-timer">1s</span>
-                <button class="sort-btn" onclick="toggleView()">切换视图</button>
+                <span class="refresh-info" id="refresh-timer">3s</span>
             </div>
         </div>
 
         <div id="content">
-            <div class="loading">正在加载数据...</div>
+            <div class="loading" id="empty-message">正在加载数据...</div>
         </div>
     </div>
 
     <script>
         let currentData = [];
         let symbolStates = {};
-        let sortColumn = 'change_amount';
-        let sortDirection = 'desc';
-        let countdown = 1;
+        let countdown = 3;
         let debounceTimer = null;
-        let viewMode = 'dual';
 
         // 双列各自的排序状态
         let dualSort = {
@@ -406,12 +390,13 @@
             return currentPrice - old.p;
         }
 
-        function handleSort(column) {
-            if (sortColumn === column) {
-                sortDirection = sortDirection === 'desc' ? 'asc' : 'desc';
+        function handleDualSort(side, col) {
+            const current = dualSort[side];
+            if (current.col === col) {
+                current.dir = current.dir === 'desc' ? 'asc' : 'desc';
             } else {
-                sortColumn = column;
-                sortDirection = 'desc';
+                current.col = col;
+                current.dir = 'desc';
             }
             renderTable();
         }
@@ -431,7 +416,9 @@
                 }
 
                 state.history.push({ t: now, p: currentPrice });
-                state.history = state.history.filter(h => now - h.t <= 120000);
+                while (state.history.length > 0 && now - state.history[0].t > 120000) {
+                    state.history.shift();
+                }
 
                 if (state.history.length > 0) {
                     const nowMs = Date.now();
@@ -523,7 +510,16 @@
 
         function renderTable() {
             if (!currentData || currentData.length === 0) {
-                document.getElementById('content').innerHTML = '<div class="loading">暂无数据</div>';
+                // 如果是首次加载或获取不到数据
+                let emptyMsg = document.getElementById('empty-message');
+                if (!emptyMsg) {
+                    emptyMsg = document.createElement('div');
+                    emptyMsg.id = 'empty-message';
+                    emptyMsg.className = 'loading';
+                    document.getElementById('content').appendChild(emptyMsg);
+                }
+                emptyMsg.style.display = 'block';
+                emptyMsg.textContent = '暂无数据';
                 return;
             }
 
@@ -546,13 +542,26 @@
             });
 
             if (filteredData.length === 0) {
-                document.getElementById('content').innerHTML = '<div class="loading">暂无符合条件的数据</div>';
+                // hide skeleton if data is empty, but don't destroy it to allow recovery
+                let skeleton = document.getElementById('ranking-skeleton');
+                if (skeleton) skeleton.style.display = 'none';
+                
+                let emptyMsg = document.getElementById('empty-message');
+                if (!emptyMsg) {
+                    emptyMsg = document.createElement('div');
+                    emptyMsg.id = 'empty-message';
+                    emptyMsg.className = 'loading';
+                    document.getElementById('content').appendChild(emptyMsg);
+                }
+                emptyMsg.style.display = 'block';
+                emptyMsg.textContent = '暂无符合条件的数据';
                 return;
-            }
-
-            if (viewMode === 'full') {
-                renderFullTable(filteredData);
-                return;
+            } else {
+                let emptyMsg = document.getElementById('empty-message');
+                if (emptyMsg) emptyMsg.style.display = 'none';
+                
+                let skeleton = document.getElementById('ranking-skeleton');
+                if (skeleton) skeleton.style.display = 'grid'; // .dual-panel uses grid
             }
 
             // dual 模式：只保留 5% 置顶，变色预警不再置顶
@@ -567,10 +576,32 @@
             const topGainers = [...pinnedUp,   ...normalUp  ];
             const topLosers  = [...pinnedDown, ...normalDown];
 
-            const buildTable = (list, side) => {
+            // 增量 DOM 更新 (DOM Patching)
+            let skeleton = document.getElementById('ranking-skeleton');
+            if (!skeleton) {
+                document.getElementById('content').innerHTML = `
+                    <div class="dual-panel" id="ranking-skeleton">
+                        <div class="panel panel-up">
+                            <div class="panel-title up">▲ 涨幅榜</div>
+                            <table>
+                                <thead id="thead-up"></thead>
+                                <tbody id="tbody-up"></tbody>
+                            </table>
+                        </div>
+                        <div class="panel panel-down">
+                            <div class="panel-title down">▼ 跌幅榜</div>
+                            <table>
+                                <thead id="thead-down"></thead>
+                                <tbody id="tbody-down"></tbody>
+                            </table>
+                        </div>
+                    </div>`;
+            }
+
+            const updateSide = (list, side) => {
                 const { col, dir } = dualSort[side];
 
-                // buildTable 内部按两层分组：置顶 > 普通
+                // 分组：置顶 > 普通
                 const pinned  = list.filter(x => isPinnedActive(x, side));
                 const normal  = list.filter(x => !isPinnedActive(x, side) && (
                     side === 'up' ? Number(x.change_pct) >= 0 : Number(x.change_pct) < 0
@@ -588,7 +619,8 @@
                     return dir === 'desc' ? valB - valA : valA - valB;
                 };
 
-                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)];
+                // 限制渲染数量为 250 条
+                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)].slice(0, 250);
 
                 const icon = (c) => {
                     if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>';
@@ -598,19 +630,50 @@
                     ? 'style="color:#007acc;cursor:pointer"'
                     : 'style="cursor:pointer"';
 
-                let rows = '';
-                sortedList.forEach((item, i) => {
-                    const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down';
+                // 更新表头
+                document.getElementById(`thead-${side}`).innerHTML = `
+                    <tr>
+                        <th style="text-align:center">#</th>
+                        <th style="text-align:left">代码</th>
+                        <th onclick="handleDualSort('${side}','last_price')"    ${thCls('last_price')}>最新价 ${icon('last_price')}</th>
+                        <th onclick="handleDualSort('${side}','open_price')"    ${thCls('open_price')}>开盘价 ${icon('open_price')}</th>
+                        <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th>
+                        <th onclick="handleDualSort('${side}','change_pct')"    ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th>
+                        <th onclick="handleDualSort('${side}','total_volume')"  ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th>
+                        <th onclick="handleDualSort('${side}','2m')"            ${thCls('2m')}>2分涨跌 ${icon('2m')}</th>
+                    </tr>`;
 
+                // 更新表体 (增量 Patch)
+                const tbody = document.getElementById(`tbody-${side}`);
+                let childIndex = 0;
+
+                sortedList.forEach((item, i) => {
+                    const safeSymbol = item.symbol.replace(/[^a-zA-Z0-9]/g, '-');
+                    const rowId = `row-${side}-${safeSymbol}`;
+                    let tr = document.getElementById(rowId);
+                    
+                    if (!tr) {
+                        tr = document.createElement('tr');
+                        tr.id = rowId;
+                        tbody.insertBefore(tr, tbody.children[childIndex] || null);
+                    } else if (tbody.children[childIndex] !== tr) {
+                        // 如果位置不对，移动到正确位置
+                        tbody.insertBefore(tr, tbody.children[childIndex] || null);
+                    }
+                    childIndex++;
+
+                    const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down';
                     const isWarning   = isActiveWarning(item, side);
                     const isPinned    = isPinnedActive(item, side);
-                    const pinnedMark  = getPinnedMark(item, side); // ⚡ 去掉，只用 📌 / ⏱
+                    const pinnedMark  = getPinnedMark(item, side);
                     const borderColor = side === 'up' ? '#26a69a' : '#ef5350';
-                    const leftBorder  = isPinned ? `border-left:3px solid ${borderColor};` : '';
+                    const leftBorder  = isPinned ? `3px solid ${borderColor}` : '';
                     const warningBg   = isWarning 
-                        ? (side === 'up' ? 'background-color:rgba(38,166,154,0.2);' : 'background-color:rgba(239,83,80,0.2);') 
+                        ? (side === 'up' ? 'rgba(38,166,154,0.2)' : 'rgba(239,83,80,0.2)') 
                         : '';
-                    const rowStyle = (leftBorder || warningBg) ? ` style="${leftBorder}${warningBg}"` : '';
+                    
+                    if (tr.style.borderLeft !== leftBorder) tr.style.borderLeft = leftBorder;
+                    if (tr.style.backgroundColor !== warningBg) tr.style.backgroundColor = warningBg;
 
                     // 2分钟涨跌
                     const change2m = get2mChange(item.symbol, Number(item.last_price));
@@ -619,127 +682,35 @@
                         ? `<span class="${change2mClass}">${change2m > 0 ? '+' : ''}${change2m.toFixed(2)}</span>`
                         : '-';
 
-                    rows += `
-                        <tr${rowStyle}>
-                            <td style="text-align:center;color:#666">${i + 1}${pinnedMark}</td>
-                            <td class="symbol">${item.symbol}</td>
-                            <td class="${changeClass}">${formatNumber(item.last_price)}</td>
-                            <td>${formatNumber(item.open_price)}</td>
-                            <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
-                            <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
-                            <td>${formatVolume(item.total_volume)}</td>
-                            <td>${change2mStr}</td>
-                        </tr>`;
-                });
-
-                return `
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="text-align:center">#</th>
-                                <th style="text-align:left">代码</th>
-                                <th onclick="handleDualSort('${side}','last_price')"    ${thCls('last_price')}>最新价 ${icon('last_price')}</th>
-                                <th onclick="handleDualSort('${side}','open_price')"    ${thCls('open_price')}>开盘价 ${icon('open_price')}</th>
-                                <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th>
-                                <th onclick="handleDualSort('${side}','change_pct')"    ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th>
-                                <th onclick="handleDualSort('${side}','total_volume')"  ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th>
-                                <th onclick="handleDualSort('${side}','2m')"            ${thCls('2m')}>2分涨跌 ${icon('2m')}</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>`;
-            };
-
-            document.getElementById('content').innerHTML = `
-                <div class="dual-panel">
-                    <div class="panel panel-up">
-                        <div class="panel-title up">▲ 涨幅榜</div>
-                        ${buildTable(topGainers, 'up')}
-                    </div>
-                    <div class="panel panel-down">
-                        <div class="panel-title down">▼ 跌幅榜</div>
-                        ${buildTable(topLosers, 'down')}
-                    </div>
-                </div>`;
-        }
-
-        function renderFullTable(data = currentData) {
-            const sorted = [...data].sort((a, b) => {
-                let valA = a[sortColumn];
-                let valB = b[sortColumn];
-                if (sortColumn !== 'symbol') {
-                    valA = Number(valA);
-                    valB = Number(valB);
-                }
-                if (sortDirection === 'asc') return valA > valB ? 1 : -1;
-                return valA < valB ? 1 : -1;
-            });
-
-            const getSortIcon = (col) => {
-                if (sortColumn !== col) return '↕';
-                return sortDirection === 'asc' ? '↑' : '↓';
-            };
-
-            const getHeaderClass = (col) => sortColumn === col ? 'active' : '';
-
-            let html = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th>排名</th>
-                            <th onclick="handleSort('symbol')"         class="${getHeaderClass('symbol')}">代码 <span class="sort-icon">${getSortIcon('symbol')}</span></th>
-                            <th onclick="handleSort('last_price')"     class="${getHeaderClass('last_price')}">最新价 <span class="sort-icon">${getSortIcon('last_price')}</span></th>
-                            <th onclick="handleSort('open_price')"     class="${getHeaderClass('open_price')}">开盘价 <span class="sort-icon">${getSortIcon('open_price')}</span></th>
-                            <th onclick="handleSort('change_amount')"  class="${getHeaderClass('change_amount')}">涨跌额 <span class="sort-icon">${getSortIcon('change_amount')}</span></th>
-                            <th onclick="handleSort('change_pct')"     class="${getHeaderClass('change_pct')}">涨跌幅% <span class="sort-icon">${getSortIcon('change_pct')}</span></th>
-                            <th onclick="handleSort('total_volume')"   class="${getHeaderClass('total_volume')}">成交量 <span class="sort-icon">${getSortIcon('total_volume')}</span></th>
-                            <th>1分涨跌</th>
-                            <th>2分涨跌</th>
-                            <th onclick="handleSort('price_change_3m')" class="${getHeaderClass('price_change_3m')}">3分涨跌 <span class="sort-icon">${getSortIcon('price_change_3m')}</span></th>
-                            <th class="hide-mobile ${getHeaderClass('avg_vol_10d')}" onclick="handleSort('avg_vol_10d')">10日均量 <span class="sort-icon">${getSortIcon('avg_vol_10d')}</span></th>
-                            <th class="hide-mobile">量比</th>
-                        </tr>
-                    </thead>
-                    <tbody>`;
-
-            sorted.forEach((item, index) => {
-                const changeClass  = Number(item.change_amount)    > 0 ? 'up' : (Number(item.change_amount)    < 0 ? 'down' : 'flat');
-                const change3mClass = Number(item.price_change_3m) > 0 ? 'up' : (Number(item.price_change_3m) < 0 ? 'down' : 'flat');
-                const volumeRatio  = item.avg_vol_10d > 0 ? (item.total_volume / item.avg_vol_10d).toFixed(2) : '-';
-
-                html += `
-                    <tr>
-                        <td>${index + 1}</td>
+                    const newHtml = `
+                        <td style="text-align:center;color:#666">${i + 1}${pinnedMark}</td>
                         <td class="symbol">${item.symbol}</td>
                         <td class="${changeClass}">${formatNumber(item.last_price)}</td>
                         <td>${formatNumber(item.open_price)}</td>
                         <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
                         <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
                         <td>${formatVolume(item.total_volume)}</td>
-                        <td>${(() => {
-                            const c = get1mChange(item.symbol, Number(item.last_price));
-                            if (c === null) return '-';
-                            const cls = c > 0 ? 'up' : (c < 0 ? 'down' : 'flat');
-                            return `<span class="${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>`;
-                        })()}</td>
-                        <td>${(() => {
-                            const c = get2mChange(item.symbol, Number(item.last_price));
-                            if (c === null) return '-';
-                            const cls = c > 0 ? 'up' : (c < 0 ? 'down' : 'flat');
-                            return `<span class="${cls}">${c > 0 ? '+' : ''}${c.toFixed(2)}</span>`;
-                        })()}</td>
-                        <td class="${change3mClass}">${item.price_change_3m > 0 ? '+' : ''}${formatNumber(item.price_change_3m)}</td>
-                        <td class="hide-mobile">${formatVolume(item.avg_vol_10d)}</td>
-                        <td class="hide-mobile">${volumeRatio}x</td>
-                    </tr>`;
-            });
+                        <td>${change2mStr}</td>
+                    `;
 
-            html += `</tbody></table>`;
-            document.getElementById('content').innerHTML = html;
+                    if (tr._lastHtml !== newHtml) {
+                        tr.innerHTML = newHtml;
+                        tr._lastHtml = newHtml;
+                    }
+                });
+
+                // 移除多余的旧行
+                while (tbody.children.length > sortedList.length) {
+                    tbody.removeChild(tbody.lastChild);
+                }
+            };
+
+            updateSide(topGainers, 'up');
+            updateSide(topLosers, 'down');
         }
 
         function resetTimer() {
-            countdown = 1;
+            countdown = 3;
             updateTimerDisplay();
         }
 
