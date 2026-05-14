@@ -1,13 +1,10 @@
 const express = require('express');
 const fs = require('fs');
-// const compression = require('compression'); // Temporarily disabled for debugging
 const path = require('path');
 const { Pool } = require('pg');
 const { getFlexibleHills } = require('./scan-flexible-hills');
 const ConfigManager = require('./config-manager');
 const app = express();
-
-// app.use(compression());
 
 // Enable CORS for development/preview
 app.use((req, res, next) => {
@@ -16,7 +13,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// 数据库连接池配置
+// 主连接池
 const pgSchema = process.env.PGSCHEMA || 'market_data';
 const pool = new Pool({
   host: process.env.PGHOST || 'localhost',
@@ -34,14 +31,11 @@ pool.on('connect', (client) => {
   client.query('SET search_path TO ' + pgSchema);
 });
 
-pool.on('error', (err, client) => {
+pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err.message);
 });
 
-// ============================================================
 // [FIX 1] 独立连接池，专供 PriceWindow 和 PriceCache
-// 不被 RankingCache / DailySummary / HillMonitor 等重查询抢占
-// ============================================================
 const pricePool = new Pool({
   host: process.env.PGHOST || 'localhost',
   port: Number(process.env.PGPORT || 5432),
@@ -69,7 +63,7 @@ async function ensureTables() {
   const client = await pool.connect();
   try {
     await client.query('SET search_path TO ' + pgSchema);
-    
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS k_alerts (
         id SERIAL PRIMARY KEY,
@@ -115,7 +109,7 @@ async function ensureTables() {
         PRIMARY KEY (symbol, trade_date)
       );
     `);
-    
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS daily_summary (
         symbol TEXT NOT NULL,
@@ -128,7 +122,7 @@ async function ensureTables() {
         PRIMARY KEY (symbol, trade_date)
       );
     `);
-    
+
     await client.query(`
       CREATE TABLE IF NOT EXISTS k_hill_alerts (
         id SERIAL PRIMARY KEY,
@@ -153,7 +147,6 @@ async function ensureTables() {
         max_value NUMERIC,
         updated_at TIMESTAMPTZ DEFAULT NOW()
       );
-      
       CREATE TABLE IF NOT EXISTS settings_change_log (
         id SERIAL PRIMARY KEY,
         key TEXT NOT NULL,
@@ -169,7 +162,6 @@ async function ensureTables() {
       CREATE INDEX IF NOT EXISTS idx_tos_trades_symbol_received ON tos_trades (symbol, received_at DESC);
       CREATE INDEX IF NOT EXISTS idx_tos_trades_received ON tos_trades (received_at DESC);
     `);
-
     await client.query(`
       CREATE INDEX IF NOT EXISTS idx_daily_summary_trade_date ON daily_summary (trade_date);
     `);
@@ -201,10 +193,8 @@ try {
 // In-memory price snapshot cache: symbol -> { price, receivedAt }
 const priceCache = new Map();
 
-// ============================================================
 // [FIX 2] updatePriceCache 改用 LATERAL 逐 symbol 取最新价
-// 避免 DISTINCT ON 全表扫描 + 磁盘排序（原耗时 9.7s → 29ms）
-// ============================================================
+// 避免 DISTINCT ON 全表扫描 + 磁盘排序（原耗时 9.7s -> 29ms）
 async function updatePriceCache() {
   try {
     const { rows } = await pricePool.query(`
@@ -232,9 +222,7 @@ async function updatePriceCache() {
 // Sliding 4-minute price window: symbol -> array of { price, receivedAt } sorted oldest-first
 const priceWindow = new Map();
 
-// ============================================================
 // [FIX 3] updatePriceWindow 改用 pricePool，加 id ASC 修复同毫秒乱序
-// ============================================================
 async function updatePriceWindow() {
   const client = await pricePool.connect();
   try {
@@ -266,21 +254,21 @@ app.get('/api/price-snapshot', async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
     const minutes = Number(req.query.minutes || 5);
-    
+
     if (!symbol) return res.status(400).json({ error: 'symbol required' });
 
     const currentRes = await pool.query(`
-      SELECT price::numeric 
-      FROM tos_trades 
-      WHERE symbol = $1 
+      SELECT price::numeric
+      FROM tos_trades
+      WHERE symbol = $1
       ORDER BY received_at DESC, id DESC
       LIMIT 1
     `, [symbol]);
 
     const prevRes = await pool.query(`
-      SELECT price::numeric 
-      FROM tos_trades 
-      WHERE symbol = $1 
+      SELECT price::numeric
+      FROM tos_trades
+      WHERE symbol = $1
         AND received_at <= (now() AT TIME ZONE 'Asia/Shanghai' - ($2 || ' minutes')::interval)
       ORDER BY received_at DESC, id DESC
       LIMIT 1
@@ -291,14 +279,13 @@ app.get('/api/price-snapshot', async (req, res) => {
     const change = (current && previous) ? Number((current - previous).toFixed(2)) : 0;
 
     return res.json({ current, previous, change });
-
   } catch (e) {
     console.error('price-snapshot error:', e);
     return res.status(500).json({ error: 'internal_error' });
   }
 });
 
-// OHLCV API 路由
+// OHLCV API
 app.get('/api/ohlcv', async (req, res) => {
   try {
     const symbol = String(req.query.symbol || '').trim();
@@ -311,14 +298,14 @@ app.get('/api/ohlcv', async (req, res) => {
                $2::text AS target_date
       ),
       filtered AS (
-        SELECT t.symbol, 
-               CASE 
+        SELECT t.symbol,
+               CASE
                  WHEN trim(t.trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN trim(t.trade_time)::timestamp
                  ELSE (p.target_date || ' ' || trim(t.trade_time))::timestamp
                END AS ts,
-               t.price::numeric AS price, 
+               t.price::numeric AS price,
                t.size,
-               CASE 
+               CASE
                  WHEN trim(t.trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN date_trunc('minute', trim(t.trade_time)::timestamp)
                  ELSE date_trunc('minute', (p.target_date || ' ' || trim(t.trade_time))::timestamp)
                END AS bucket
@@ -378,7 +365,7 @@ app.get('/api/ohlcv', async (req, res) => {
         FROM joined
       ),
       filled_data AS (
-        SELECT 
+        SELECT
           bucket,
           open, high, low,
           COALESCE(volume, 0) as v,
@@ -386,7 +373,7 @@ app.get('/api/ohlcv', async (req, res) => {
         FROM locf_grp
       ),
       final_ohlc AS (
-        SELECT 
+        SELECT
           bucket AS t,
           COALESCE(open, LAG(c_filled) OVER (ORDER BY bucket)) AS o,
           COALESCE(high, COALESCE(open, LAG(c_filled) OVER (ORDER BY bucket))) AS h,
@@ -395,7 +382,7 @@ app.get('/api/ohlcv', async (req, res) => {
           v
         FROM filled_data
       )
-      SELECT 
+      SELECT
         t, o, h, l, c, v,
         ROUND(AVG(c) OVER (ORDER BY t ROWS BETWEEN 4 PRECEDING AND CURRENT ROW), 2) AS ma5,
         ROUND(AVG(c) OVER (ORDER BY t ROWS BETWEEN 9 PRECEDING AND CURRENT ROW), 2) AS ma10,
@@ -416,22 +403,27 @@ app.get('/api/l2-alert-history', async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit || 100), 500);
     const minutes = Number(req.query.minutes || 0);
-    const market = String(req.query.market || 'BL');
-    const table = `market_data.l2_alert_history_${market.toLowerCase()}`;
-    
+    const market = String(req.query.market || 'BL').toLowerCase();
+
+    const ALLOWED_MARKETS = new Set(['bl', 'sh', 'sz']);
+    if (!ALLOWED_MARKETS.has(market)) {
+      return res.status(400).json({ error: 'invalid_market' });
+    }
+    const table = `market_data.l2_alert_history_${market}`;
+
     let timeCondition = '';
-    let params = [limit];
-    
+    const params = [limit];
+
     if (minutes > 0) {
       timeCondition = `WHERE h.created_at >= NOW() - INTERVAL '${minutes} minutes' AND h.level <= 3`;
     } else {
-      timeCondition = `WHERE h.created_at >= CURRENT_DATE AND h.level <= 3`;
+      timeCondition = `WHERE h.created_at >= CURRENT_DATE`;
     }
 
     const sql = `
-      SELECT h.id, h.stock_code, h.alert_type, h.level, h.price, h.volume, h.price_ratio, 
+      SELECT h.id, h.stock_code, h.alert_type, h.level, h.price, h.volume, h.price_ratio,
              h.trend_type, h.prev_price, h.prev_volume, h.prev_level,
-             h.price_change_abs, h.price_change_ratio, h.volume_change_abs, h.volume_change_ratio, 
+             h.price_change_abs, h.price_change_ratio, h.volume_change_abs, h.volume_change_ratio,
              h.level_delta, h.alert_message, h.created_at,
              COALESCE(d.total_volume, 0) as total_volume
       FROM ${table} h
@@ -440,7 +432,7 @@ app.get('/api/l2-alert-history', async (req, res) => {
       ORDER BY h.created_at DESC
       LIMIT $1
     `;
-    
+
     const { rows } = await pool.query(sql, params);
     res.json(rows);
   } catch (e) {
@@ -481,24 +473,24 @@ app.post('/api/settings/trigger-volume-scan', async (req, res) => {
 app.get('/api/test-db', async (req, res) => {
   try {
     const tableCheck = await pool.query(`
-      SELECT table_name 
-      FROM information_schema.tables 
+      SELECT table_name
+      FROM information_schema.tables
       WHERE table_schema = $1 AND table_name = 'tos_trades'
     `, [process.env.PGSCHEMA || 'market_data']);
-    
+
     if (tableCheck.rows.length === 0) {
       return res.json({ error: 'tos_trades table not found', schema: process.env.PGSCHEMA || 'market_data' });
     }
-    
+
     const columns = await pool.query(`
-      SELECT column_name, data_type 
-      FROM information_schema.columns 
+      SELECT column_name, data_type
+      FROM information_schema.columns
       WHERE table_schema = $1 AND table_name = 'tos_trades'
       ORDER BY ordinal_position
     `, [process.env.PGSCHEMA || 'market_data']);
-    
+
     const sample = await pool.query('SELECT * FROM tos_trades LIMIT 3');
-    
+
     return res.json({
       table_exists: true,
       columns: columns.rows,
@@ -538,17 +530,13 @@ app.get('/api/alerts', async (req, res) => {
 let rankingCache = [];
 let rankingCacheTime = null;
 
-// ============================================================
 // [FIX 4] refreshRankingCache 不再查 tos_trades，改用内存 priceCache join
-// 把查询时间从 >20s 降到 <1s
-// ============================================================
 async function refreshRankingCache() {
   const client = await pool.connect();
   try {
     await client.query('SET statement_timeout = 20000');
     const safeEtfList = etfList.length > 0 ? etfList : ['__NO_ETF__'];
 
-    // 只查 daily_summary，完全不碰 tos_trades
     const sql = `
       WITH avg_vol AS (
         SELECT symbol, AVG(total_volume) AS avg_vol
@@ -572,7 +560,6 @@ async function refreshRankingCache() {
 
     const { rows } = await client.query(sql, [safeEtfList]);
 
-    // 在内存里 join priceCache，不查数据库
     const newCache = rows.map(row => {
       const cached = priceCache.get(row.symbol);
       const lastPrice = cached ? cached.price : Number(row.open_price);
@@ -589,7 +576,6 @@ async function refreshRankingCache() {
       };
     });
 
-    // 按涨跌幅排序
     newCache.sort((a, b) => b.change_amount - a.change_amount);
     rankingCache = newCache;
     rankingCacheTime = new Date();
@@ -606,14 +592,13 @@ async function refreshRankingCache() {
     }
   } catch (err) {
     console.error('[RankingCache] Error:', err.message);
-    // 超时时保留旧缓存，不清空
   } finally {
     await client.query('SET statement_timeout = 0').catch(e => console.error(e));
     client.release();
   }
 }
 
-// 排行榜 API — 直接返回缓存数据
+// 排行榜 API
 app.get('/api/ranking', (req, res) => {
   try {
     const minVolume = Number(req.query.min_volume || 0);
@@ -679,11 +664,7 @@ app.get('/api/large-orders-screener', async (req, res) => {
     `;
 
     const { rows } = await pool.query(sql, [timeWindowMins, minOrderVolume, safeEtfList]);
-    
-    // ============================================================
-    // [FIX 5] 大单最新价：优先 priceWindow 末尾，回退到 priceCache，
-    //         最后才用 close_price，避免长时间显示陈旧快照价
-    // ============================================================
+
     const result = rows.map(row => {
       const window = priceWindow.get(row.symbol);
       let currentPrice;
@@ -703,7 +684,7 @@ app.get('/api/large-orders-screener', async (req, res) => {
   }
 });
 
-// === 山丘形放量查询 API (Flexible Hills) ===
+// === 山丘形放量查询 API ===
 app.get('/api/patterns/flexible-hills', async (req, res) => {
   try {
     const dateQuery = req.query.date;
@@ -715,7 +696,7 @@ app.get('/api/patterns/flexible-hills', async (req, res) => {
   }
 });
 
-// === K Hill Alerts 查询 API (Database) ===
+// === K Hill Alerts 查询 API ===
 app.get('/api/hill-alerts', async (req, res) => {
   try {
     const limit = Math.min(Number(req.query.limit || 50), 100);
@@ -728,7 +709,7 @@ app.get('/api/hill-alerts', async (req, res) => {
       ORDER BY bucket_time DESC
       LIMIT $2
     `;
-    
+
     const { rows } = await pool.query(sql, [minRatio, limit]);
     res.json(rows);
   } catch (e) {
@@ -747,7 +728,6 @@ const VOLUME_Z_THRESHOLD = Number(process.env.VOLUME_Z_THRESHOLD || 2.0);
 const MARKET_OPEN_MINS = 8 * 60;
 const MARKET_CLOSE_MINS = 16 * 60;
 const TOTAL_MARKET_MINS = MARKET_CLOSE_MINS - MARKET_OPEN_MINS;
-const MIN_ELAPSED_PCT = 0.08;
 
 function getMarketElapsedPct() {
   const nowET = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }));
@@ -762,7 +742,7 @@ const isValidDate = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d);
 app.post('/api/volume/daily-refresh', async (req, res) => {
   const start = String(req.query.start || '').trim();
   const end = String(req.query.end || '').trim();
-  
+
   if (!isValidDate(start) || !isValidDate(end)) {
     return res.status(400).json({ error: 'invalid_date_format', message: 'Use YYYY-MM-DD' });
   }
@@ -788,7 +768,7 @@ app.post('/api/volume/daily-refresh', async (req, res) => {
       GROUP BY symbol, trade_date
       ON CONFLICT (symbol, trade_date)
       DO UPDATE SET daily_volume = EXCLUDED.daily_volume, updated_at = now();`;
-      
+
     await pool.query(sql, [start, end]);
     res.json({ ok: true, start, end, timestamp: new Date() });
   } catch (e) {
@@ -808,7 +788,7 @@ app.get('/api/volume/summary', async (req, res) => {
   }
 
   const orderBy = order === 'avg' ? 'avg_volume' : 'total_volume';
-  
+
   const sql = `
     SELECT symbol,
            SUM(daily_volume) AS total_volume,
@@ -835,14 +815,14 @@ app.get('/api/volume/avg-daily', async (req, res) => {
   const symbol = String(req.query.symbol || '').trim();
   const start = String(req.query.start || '').trim();
   const end = String(req.query.end || '').trim();
-  
+
   if (!symbol || !isValidDate(start) || !isValidDate(end)) return res.status(400).json({ error: 'invalid_params' });
-  
+
   const sql = `
     SELECT COALESCE(AVG(daily_volume), 0) AS avg_daily_vol
     FROM tos_daily_volume
     WHERE symbol = $1 AND trade_date >= $2::date AND trade_date < $3::date;`;
-    
+
   const { rows } = await pool.query(sql, [symbol, start, end]);
   res.json(rows[0]);
 });
@@ -850,9 +830,9 @@ app.get('/api/volume/avg-daily', async (req, res) => {
 app.get('/api/volume/cumulative', async (req, res) => {
   const symbol = String(req.query.symbol || '').trim();
   const date = String(req.query.date || '').trim();
-  
+
   if (!symbol || !isValidDate(date)) return res.status(400).json({ error: 'invalid_params' });
-  
+
   const sql = `
     SELECT COALESCE(SUM(size), 0) AS cumulative_vol
     FROM tos_trades
@@ -861,28 +841,28 @@ app.get('/api/volume/cumulative', async (req, res) => {
       OR
       (trim(trade_time) !~ '^\\d{4}-\\d{2}-\\d{2}' AND created_at >= $2::date AND created_at < ($2::date + INTERVAL '1 day'))
     );`;
-    
+
   const { rows } = await pool.query(sql, [symbol, date]);
   res.json(rows[0]);
 });
 
 app.post('/api/alerts/daily-volume-pct/scan', async (req, res) => {
   const { symbol, date, start, end, threshold } = req.query;
-  
+
   if (!symbol || !isValidDate(date) || !isValidDate(start) || !isValidDate(end) || !threshold) {
     return res.status(400).json({ error: 'params_missing_or_invalid' });
   }
 
   const avgRes = await pool.query(
-    `SELECT COALESCE(AVG(daily_volume), 0) AS avg FROM tos_daily_volume 
+    `SELECT COALESCE(AVG(daily_volume), 0) AS avg FROM tos_daily_volume
      WHERE symbol = $1 AND trade_date >= $2::date AND trade_date < $3::date`,
     [symbol, start, end]
   );
   const avg = Number(avgRes.rows[0].avg || 0);
-  
+
   const cumRes = await pool.query(
-    `SELECT COALESCE(SUM(size), 0) AS val, date_trunc('minute', now()) as now_bucket 
-     FROM tos_trades 
+    `SELECT COALESCE(SUM(size), 0) AS val, date_trunc('minute', now()) as now_bucket
+     FROM tos_trades
      WHERE symbol = $1 AND (
        (trim(trade_time) ~ '^\\d{4}-\\d{2}-\\d{2}' AND trim(trade_time)::timestamp >= $2::timestamp AND trim(trade_time)::timestamp < ($2::date + INTERVAL '1 day'))
        OR
@@ -891,18 +871,18 @@ app.post('/api/alerts/daily-volume-pct/scan', async (req, res) => {
     [symbol, date]
   );
   const cum = Number(cumRes.rows[0].val || 0);
-  
+
   const pct = avg > 0 ? cum / avg : 0;
   if (pct < Number(threshold)) {
     return res.json({ triggered: false, pct, cum, avg });
   }
-  
+
   const insertSql = `
     INSERT INTO k_volume_alerts(symbol, bucket, volume_ratio, current_cum_vol, avg_daily_vol)
     VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT (symbol, bucket) DO NOTHING
     RETURNING id;`;
-    
+
   const tx = await pool.query(insertSql, [symbol, cumRes.rows[0].now_bucket, pct, cum, avg]);
   res.json({ triggered: tx.rowCount > 0, pct, bucket: cumRes.rows[0].now_bucket });
 });
@@ -928,13 +908,13 @@ async function scanAndInsertAlerts() {
   try {
     const sql = `
       WITH params AS (
-        SELECT 
+        SELECT
           date_trunc('minute', (now() AT TIME ZONE 'Asia/Shanghai')) AS cur_bucket_local,
           date_trunc('minute', (now() AT TIME ZONE 'Asia/Shanghai')) - INTERVAL '1 minute' AS prev_bucket_local,
           (now() AT TIME ZONE 'Asia/Shanghai')::date AS target_date
       ),
       minute_trades AS (
-        SELECT 
+        SELECT
           t.symbol,
           (t.received_at AT TIME ZONE 'Asia/Shanghai') AS ts_local,
           t.price::numeric AS price,
@@ -1000,12 +980,12 @@ async function ensureVolumeAlertSchema() {
       END IF;
     END $$
   `);
-  
+
   await pool.query(`
     INSERT INTO app_settings (key, value, value_type, description)
-    VALUES ('time_checkpoints', 
-            '[{"elapsed_minutes": 120, "expected_pct": 0.30, "label": "开市2小时"}, {"elapsed_minutes": 180, "expected_pct": 0.50, "label": "开市3小时"}, {"elapsed_minutes": 240, "expected_pct": 0.75, "label": "收盘前"}]', 
-            'json', 
+    VALUES ('time_checkpoints',
+            '[{"elapsed_minutes": 120, "expected_pct": 0.30, "label": "开市2小时"}, {"elapsed_minutes": 180, "expected_pct": 0.50, "label": "开市3小时"}, {"elapsed_minutes": 240, "expected_pct": 0.75, "label": "收盘前"}]',
+            'json',
             'Time checkpoints for volume alerts')
     ON CONFLICT (key) DO NOTHING
   `);
@@ -1013,15 +993,12 @@ async function ensureVolumeAlertSchema() {
   volumeSchemaReady = true;
 }
 
-// ============================================================
-// [FIX 6] updateDailySummary 改为增量模式：只聚合最近2分钟新数据
-// GREATEST/LEAST 合并 high/low，total_volume 累加而非全量覆盖
-// 把查询时间从 >50s 降到 <2s
-// ============================================================
+// [FIX 6] updateDailySummary 增量模式
+// [FIX H] open_price 使用 CASE 保护，一旦写入不再覆盖
 async function updateDailySummary() {
   const client = await pool.connect();
   try {
-    await client.query('SET statement_timeout = 15000'); // 15秒够了
+    await client.query('SET statement_timeout = 15000');
     const sql = `
       INSERT INTO market_data.daily_summary
         (symbol, trade_date, open_price, close_price, high_price, low_price, total_volume)
@@ -1040,11 +1017,10 @@ async function updateDailySummary() {
         AND market_time IS NOT NULL AND market_time != ''
       GROUP BY symbol, (received_at AT TIME ZONE 'Asia/Shanghai')::date
       ON CONFLICT (symbol, trade_date) DO UPDATE SET
-        -- open_price 只在更小时更新（保留当日真正的开盘价）
-        open_price   = LEAST(daily_summary.open_price, EXCLUDED.open_price),
+        open_price   = CASE WHEN daily_summary.open_price IS NULL THEN EXCLUDED.open_price ELSE daily_summary.open_price END,
         close_price  = EXCLUDED.close_price,
         high_price   = GREATEST(daily_summary.high_price, EXCLUDED.high_price),
-        low_price    = LEAST(daily_summary.low_price,  EXCLUDED.low_price),
+        low_price    = LEAST(daily_summary.low_price, EXCLUDED.low_price),
         total_volume = daily_summary.total_volume + EXCLUDED.total_volume
     `;
     await client.query(sql);
@@ -1061,13 +1037,13 @@ async function scanAllVolumeAlerts() {
 
   const VOLUME_HISTORY_DAYS = await config.get('volume_history_days', 20);
   console.log(`[VolumeMonitor] Running scan with history=${VOLUME_HISTORY_DAYS}d`);
-  
+
   let timeCheckpoints = await config.get('time_checkpoints', []);
   if (!Array.isArray(timeCheckpoints)) {
     console.warn('[VolumeMonitor] time_checkpoints is not an array, using defaults');
     timeCheckpoints = [
-      { elapsed_minutes: 120, expected_pct: 0.30, label: "开市2小时" }, 
-      { elapsed_minutes: 180, expected_pct: 0.50, label: "开市3小时" }, 
+      { elapsed_minutes: 120, expected_pct: 0.30, label: "开市2小时" },
+      { elapsed_minutes: 180, expected_pct: 0.50, label: "开市3小时" },
       { elapsed_minutes: 240, expected_pct: 0.75, label: "收盘前" }
     ];
   }
@@ -1104,24 +1080,24 @@ async function scanAllVolumeAlerts() {
 
   const now = new Date();
   const nowBeijing = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
-  
+
   const day = nowBeijing.getDay();
   if (day === 0 || day === 6) {
     console.log('[VolumeMonitor] Weekend detected but continuing for testing/verification purposes.');
   }
 
   const currentMins = nowBeijing.getHours() * 60 + nowBeijing.getMinutes();
-  const elapsedMinutes = currentMins - MARKET_OPEN_MINS; 
+  const elapsedMinutes = currentMins - MARKET_OPEN_MINS;
 
   console.log(`[VolumeMonitor] Beijing Time: ${nowBeijing.toLocaleTimeString()}, elapsedMinutes=${elapsedMinutes}`);
   if (elapsedMinutes <= 0) return;
 
   let totalTriggered = 0;
-  
+
   for (const cp of timeCheckpoints) {
     if (elapsedMinutes < cp.elapsed_minutes) continue;
 
-    const ruleId = `checkpoint_${cp.elapsed_minutes}min_${Math.round(cp.expected_pct*100)}pct`;
+    const ruleId = `checkpoint_${cp.elapsed_minutes}min_${Math.round(cp.expected_pct * 100)}pct`;
 
     const sql = `
       WITH hist_ranked AS (
@@ -1172,15 +1148,13 @@ async function scanAllVolumeAlerts() {
       console.error(`[VolumeMonitor] Error checking checkpoint ${cp.label}:`, err);
     }
   }
-  
+
   if (totalTriggered > 0) {
     console.log(`[VolumeMonitor] Total alerts triggered: ${totalTriggered}`);
   }
 }
 
-// ============================================================
-// [FIX 7] HillMonitor 间隔从 60s 改为 300s，减少连接池压力
-// ============================================================
+// [FIX 7] HillMonitor 间隔 300s
 const HILL_SCAN_INTERVAL = Number(process.env.HILL_SCAN_INTERVAL || 300000);
 
 async function scanAndInsertHillAlerts() {
@@ -1240,44 +1214,37 @@ function startAlertMonitor() {
     }
   };
 
-  // 1. 价格波动监控
   runScan('PriceMonitor', scanAndInsertAlerts, 30000);
-
-  // 2. 日级成交量偏离监控
   runScan('VolumeMonitor', scanAllVolumeAlerts, VOLUME_SCAN_INTERVAL);
 
   console.log(`[ALERT monitor] starting, interval=30000ms, threshold=${(ALERT_THRESHOLD_PCT * 100).toFixed(1)}%`);
   console.log(`[VolumeMonitor] starting, interval=${VOLUME_SCAN_INTERVAL / 1000}s, ratio>=${VOLUME_RATIO_THRESHOLD}x OR z>=${VOLUME_Z_THRESHOLD}, default_history=${VOLUME_HISTORY_DAYS}d`);
-
-  // 3. DailySummaryUpdater — 增量模式，60秒刷一次
   console.log(`[DailySummaryUpdater] starting, interval=60s`);
+
   runScan('DailySummaryUpdater', updateDailySummary, 60000);
 
-  // ============================================================
-  // [FIX 8] 启动顺序：先预热 priceCache，再启动依赖它的 RankingCache
-  // RankingCache 回到 10s 刷新（查询已经很快了）
-  // ============================================================
   console.log(`[PriceCache] warming up...`);
   updatePriceCache().then(() => {
     console.log(`[PriceCache] warm up done, starting RankingCache`);
     runScan('RankingCache', refreshRankingCache, 10000);
   });
 
-  // 4. PriceCache 独立刷新，10秒一次
   runScan('PriceCache', updatePriceCache, 10000);
 
-  // 5. PriceWindow，10秒一次，使用独立连接池
   console.log(`[PriceWindow] starting, interval=10s`);
   updatePriceWindow();
   runScan('PriceWindow', updatePriceWindow, 10000);
 
-  // 6. HillMonitor，300秒一次
   console.log(`[HillMonitor] starting, interval=${HILL_SCAN_INTERVAL / 1000}s`);
   runScan('HillMonitor', scanAndInsertHillAlerts, HILL_SCAN_INTERVAL);
 }
 
 // 静态文件服务
-app.use(express.static(path.join(__dirname, '../public')));
+app.use(express.static(path.join(__dirname, '../public'), {
+    setHeaders: (res) => {
+        res.set('Cache-Control', 'no-cache, no-store, must-revalidate');
+    }
+}));
 
 app.get('/alerts',        (req, res) => res.sendFile(path.join(__dirname, '../public/alerts.html')));
 app.get('/volume-alerts', (req, res) => res.sendFile(path.join(__dirname, '../public/volume-alerts.html')));
