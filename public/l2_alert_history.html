@@ -71,6 +71,20 @@
         }
         .filter-group select { cursor: pointer; }
 
+        /* 屏蔽管理按钮 */
+        .block-btn {
+            background: #2a2a2a;
+            border: 1px solid #555;
+            color: #aaa;
+            padding: 4px 10px;
+            border-radius: 3px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .block-btn:hover { border-color: #ef5350; color: #ef5350; }
+        .block-btn.has-blocked { border-color: #ef5350; color: #ef5350; }
+
         .stats-bar {
             display: flex;
             gap: 20px;
@@ -90,16 +104,8 @@
             padding: 2px 7px;
             border-radius: 3px;
         }
-        .badge-move {
-            color: #ff6b35;
-            border: 1px solid rgba(255,107,53,0.35);
-            background: rgba(255,107,53,0.08);
-        }
-        .badge-hot {
-            color: #ffd700;
-            border: 1px solid rgba(255,215,0,0.35);
-            background: rgba(255,215,0,0.08);
-        }
+        .badge-move { color: #ff6b35; border: 1px solid rgba(255,107,53,0.35); background: rgba(255,107,53,0.08); }
+        .badge-hot  { color: #ffd700; border: 1px solid rgba(255,215,0,0.35);  background: rgba(255,215,0,0.08); }
 
         .refresh-info { font-size: 12px; color: #666; }
 
@@ -130,13 +136,36 @@
         th:nth-child(3), td:nth-child(3) { text-align: left; }
         tr:last-child td { border-bottom: none; }
         tr:hover { background: #2a2a2a; }
+        tr.pin-move { border-left: 3px solid #ff6b35; background: rgba(255,107,53,0.10) !important; }
+        tr.pin-hot  { border-left: 3px solid #ffd700; background: rgba(255,215,0,0.08)  !important; }
+        tr.pin-move:hover { background: rgba(255,107,53,0.16) !important; }
+        tr.pin-hot:hover  { background: rgba(255,215,0,0.13)  !important; }
+        tr.group-divider td { border-bottom: 2px solid rgba(255,255,255,0.1) !important; }
+        tr.pin-move.group-divider td { border-bottom: 2px solid rgba(255,107,53,0.4) !important; }
+        tr.pin-hot.group-divider td  { border-bottom: 2px solid rgba(255,215,0,0.35)  !important; }
 
         .symbol { font-weight: 600; color: #fff; }
+
+        /* 代码列屏蔽按钮：平时隐藏，行 hover 时显示 */
+        .symbol-cell { display: flex; align-items: center; gap: 5px; }
+        .btn-block-inline {
+            display: none;
+            background: none;
+            border: 1px solid #555;
+            color: #777;
+            font-size: 11px;
+            line-height: 1;
+            padding: 1px 4px;
+            border-radius: 3px;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        tr:hover .btn-block-inline { display: inline-block; }
+        .btn-block-inline:hover { border-color: #ef5350; color: #ef5350; }
         .up   { color: #26a69a; }
         .down { color: #ef5350; }
         .flat { color: #777; }
 
-        /* trend_type 标签 */
         .tag {
             display: inline-block;
             padding: 2px 7px;
@@ -149,16 +178,13 @@
         .tag-changed { background: rgba(255,152,0,0.15);  color: #ffac30; border: 1px solid rgba(255,152,0,0.35); }
         .tag-stable  { background: rgba(100,100,100,0.15);color: #888;    border: 1px solid #444; }
 
-        /* alert_type 方向标签 */
         .side-bid { color: #26a69a; font-weight: 700; }
         .side-ask { color: #ef5350; font-weight: 700; }
 
-        /* 变化列 */
         .change-cell { white-space: nowrap; }
         .arrow-up   { color: #26a69a; }
         .arrow-down { color: #ef5350; }
 
-        /* 档位 */
         .level-badge {
             display: inline-block;
             background: #333;
@@ -168,48 +194,162 @@
             font-size: 11px;
         }
 
-        /* 倍数 */
         .ratio { color: #faac30; font-weight: 600; }
-
-        /* 时间 */
         .time-cell { color: #666; font-size: 12px; white-space: nowrap; }
 
-        /* ── 一次性 flash 动画 ── */
         @keyframes flashNew { 0%{background:rgba(0,122,204,0.3)} 100%{background:transparent} }
         @keyframes flashChg { 0%{background:rgba(255,152,0,0.3)} 100%{background:transparent} }
         .flash-new { animation: flashNew 0.8s ease-out; }
         .flash-chg { animation: flashChg 0.8s ease-out; }
 
-        /* ── 第一优先级：涨跌额 > 1（橙红色静态） ── */
-        tr.pin-move {
-            border-left: 3px solid #ff6b35;
-            background: rgba(255, 107, 53, 0.10) !important;
-        }
-
-        /* ── 第二优先级：涨跌榜热股（金色静态） ── */
-        tr.pin-hot {
-            border-left: 3px solid #ffd700;
-            background: rgba(255, 215, 0, 0.08) !important;
-        }
-
-        /* 分组分隔线 */
-        tr.group-divider td {
-            border-bottom: 2px solid rgba(255,255,255,0.12) !important;
-        }
-        tr.pin-move.group-divider td {
-            border-bottom: 2px solid rgba(255,107,53,0.4) !important;
-        }
-        tr.pin-hot.group-divider td {
-            border-bottom: 2px solid rgba(255,215,0,0.35) !important;
-        }
-
         .loading { text-align: center; padding: 40px; color: #666; }
         .error   { text-align: center; padding: 40px; color: #ef5350; }
         .empty   { text-align: center; padding: 30px; color: #555; font-size: 13px; }
 
+        /* ── 右键菜单 ── */
+        #ctx-menu {
+            position: fixed;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            padding: 4px 0;
+            z-index: 9999;
+            min-width: 160px;
+            box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+            display: none;
+        }
+        #ctx-menu .ctx-item {
+            padding: 8px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            color: #ddd;
+            white-space: nowrap;
+        }
+        #ctx-menu .ctx-item:hover { background: #3a3a3a; }
+        #ctx-menu .ctx-item.danger { color: #ef5350; }
+        #ctx-menu .ctx-sep {
+            height: 1px;
+            background: #3a3a3a;
+            margin: 4px 0;
+        }
+
+        /* ── 屏蔽管理浮层 ── */
+        #block-modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 9000;
+            align-items: center;
+            justify-content: center;
+        }
+        #block-modal-overlay.open { display: flex; }
+        #block-modal {
+            background: #252525;
+            border: 1px solid #444;
+            border-radius: 8px;
+            width: 420px;
+            max-height: 70vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid #333;
+            font-size: 14px;
+            color: #ddd;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #666;
+            font-size: 18px;
+            cursor: pointer;
+            line-height: 1;
+        }
+        .modal-close:hover { color: #ddd; }
+        .modal-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 10px 16px;
+        }
+        .modal-empty { text-align: center; padding: 30px; color: #555; font-size: 13px; }
+        .block-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 7px 0;
+            border-bottom: 1px solid #2e2e2e;
+            font-size: 13px;
+        }
+        .block-item:last-child { border-bottom: none; }
+        .block-item-code { color: #fff; font-weight: 600; }
+        .unblock-btn {
+            background: none;
+            border: 1px solid #555;
+            color: #aaa;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .unblock-btn:hover { border-color: #26a69a; color: #26a69a; }
+        .modal-footer {
+            padding: 10px 16px;
+            border-top: 1px solid #333;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .modal-footer button {
+            padding: 5px 14px;
+            border-radius: 3px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid #555;
+            background: none;
+            color: #aaa;
+        }
+        .modal-footer button:hover { border-color: #ddd; color: #ddd; }
+        .modal-footer .btn-danger { border-color: #ef5350; color: #ef5350; }
+        .modal-footer .btn-danger:hover { background: rgba(239,83,80,0.12); }
+
+        /* 手动添加输入行 */
+        .modal-add {
+            display: flex;
+            gap: 8px;
+            padding: 10px 16px;
+            border-bottom: 1px solid #333;
+        }
+        .modal-add input {
+            flex: 1;
+            background: #1a1a1a;
+            border: 1px solid #444;
+            color: #ddd;
+            padding: 5px 8px;
+            border-radius: 3px;
+            font-size: 13px;
+        }
+        .modal-add button {
+            background: none;
+            border: 1px solid #555;
+            color: #aaa;
+            padding: 5px 12px;
+            border-radius: 3px;
+            font-size: 13px;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+        .modal-add button:hover { border-color: #ef5350; color: #ef5350; }
+
         @media (max-width: 900px) {
             .header-bar { flex-direction: column; align-items: flex-start; gap: 10px; }
             .filter-bar { flex-direction: column; align-items: flex-start; }
+            #block-modal { width: 90vw; }
         }
     </style>
 </head>
@@ -298,6 +438,9 @@
                 <option value="500">500条</option>
             </select>
         </div>
+        <div class="filter-group">
+            <button class="block-btn" id="btn-manage-block" onclick="openBlockModal()">🚫 屏蔽管理</button>
+        </div>
     </div>
 
     <div class="stats-bar" id="stats-bar"></div>
@@ -306,46 +449,180 @@
 
 </div>
 
+<!-- 右键菜单 -->
+<div id="ctx-menu">
+    <div class="ctx-item danger" id="ctx-block">屏蔽此股票</div>
+    <div class="ctx-sep"></div>
+    <div class="ctx-item" id="ctx-pin-move">▲ 大波动置顶说明</div>
+    <div class="ctx-item" id="ctx-pin-hot">★ 热股置顶说明</div>
+</div>
+
+<!-- 屏蔽管理浮层 -->
+<div id="block-modal-overlay" onclick="closeBlockModal(event)">
+    <div id="block-modal">
+        <div class="modal-header">
+            <span>🚫 屏蔽股票管理 <span style="color:#555;font-size:12px;margin-left:8px">仅存本机浏览器</span></span>
+            <button class="modal-close" onclick="closeBlockModal()">×</button>
+        </div>
+        <div class="modal-add">
+            <input type="text" id="manual-block-input" placeholder="手动输入代码，如 BABA.BL">
+            <button onclick="addManualBlock()">添加屏蔽</button>
+        </div>
+        <div class="modal-body" id="block-list"></div>
+        <div class="modal-footer">
+            <button class="btn-danger" onclick="clearAllBlocked()">清空全部</button>
+            <button onclick="closeBlockModal()">关闭</button>
+        </div>
+    </div>
+</div>
+
 <script>
     let allData   = [];
     let sortCol   = 'created_at';
     let sortDir   = 'desc';
     let countdown = 1;
     let knownIds  = new Set();
-    let flashIds  = {};   // id -> 'new' | 'chg'
+    let flashIds  = {};
 
-    // ── 从 /api/ranking 派生的两个置顶集合 ──
-    // moveStocks：涨跌额绝对值 > 1（第一优先级，橙红）
-    // hotStocks ：涨跌榜前50+50（第二优先级，金色）
-    // 同时命中两者的股票归入 moveStocks
-    let moveStocks = new Set();
-    let hotStocks  = new Set();
+    // ── 置顶集合（来自 /api/ranking） ──
+    let moveStocks = new Set();   // 涨跌额 > 1，第一优先级
+    let hotStocks  = new Set();   // 涨跌榜前50+50，第二优先级
 
     let rankingRefreshCountdown = 0;
-    const RANKING_REFRESH_INTERVAL = 30;   // 每30秒刷新一次
+    const RANKING_REFRESH_INTERVAL = 30;
 
-    const TREND_LABELS = {
-        new_entry: { text: '新增大单', cls: 'tag-new' },
-        changed:   { text: '大单变化', cls: 'tag-changed' },
-        stable:    { text: '持稳',     cls: 'tag-stable' },
-    };
+    // ── 屏蔽集合（来自 localStorage，仅本机） ──
+    const LS_KEY = 'l2_blocked_stocks';
+    let blockedStocks = new Set(JSON.parse(localStorage.getItem(LS_KEY) || '[]'));
 
-    // ── 从 /api/ranking 一次性提取两个集合 ──
+    function saveBlocked() {
+        localStorage.setItem(LS_KEY, JSON.stringify([...blockedStocks]));
+        // 更新屏蔽管理按钮样式
+        const btn = document.getElementById('btn-manage-block');
+        if (blockedStocks.size > 0) {
+            btn.classList.add('has-blocked');
+            btn.textContent = `🚫 屏蔽管理 (${blockedStocks.size})`;
+        } else {
+            btn.classList.remove('has-blocked');
+            btn.textContent = '🚫 屏蔽管理';
+        }
+    }
+
+    function blockStock(code) {
+        blockedStocks.add(code);
+        saveBlocked();
+        renderTable();
+        renderStats();
+    }
+
+    function unblockStock(code) {
+        blockedStocks.delete(code);
+        saveBlocked();
+        renderTable();
+        renderStats();
+        renderBlockList();
+    }
+
+    function clearAllBlocked() {
+        if (!confirm('确认清空所有屏蔽股票？')) return;
+        blockedStocks.clear();
+        saveBlocked();
+        renderTable();
+        renderStats();
+        renderBlockList();
+    }
+
+    function addManualBlock() {
+        const input = document.getElementById('manual-block-input');
+        const code  = input.value.trim().toUpperCase();
+        if (!code) return;
+        blockStock(code);
+        input.value = '';
+        renderBlockList();
+    }
+
+    // ── 屏蔽管理浮层 ──
+    function openBlockModal() {
+        renderBlockList();
+        document.getElementById('block-modal-overlay').classList.add('open');
+    }
+
+    function closeBlockModal(e) {
+        if (e && e.target !== document.getElementById('block-modal-overlay')) return;
+        document.getElementById('block-modal-overlay').classList.remove('open');
+    }
+
+    function renderBlockList() {
+        const container = document.getElementById('block-list');
+        if (blockedStocks.size === 0) {
+            container.innerHTML = '<div class="modal-empty">暂无屏蔽股票</div>';
+            return;
+        }
+        container.innerHTML = [...blockedStocks].sort().map(code => `
+            <div class="block-item">
+                <span class="block-item-code">${code}</span>
+                <button class="unblock-btn" onclick="unblockStock('${code}')">解除屏蔽</button>
+            </div>
+        `).join('');
+    }
+
+    // ── 右键菜单 ──
+    let ctxTarget = null;
+    const ctxMenu = document.getElementById('ctx-menu');
+
+    document.getElementById('content').addEventListener('contextmenu', e => {
+        const tr = e.target.closest('tr[data-code]');
+        if (!tr) return;
+        e.preventDefault();
+        ctxTarget = tr.dataset.code;
+
+        const isMove = moveStocks.has(ctxTarget);
+        const isHot  = hotStocks.has(ctxTarget);
+        document.getElementById('ctx-pin-move').textContent = isMove ? '▲ 涨跌额 > 1（大波动置顶中）' : '▲ 非大波动股票';
+        document.getElementById('ctx-pin-hot').textContent  = isHot  ? '★ 涨跌榜热股（置顶中）'       : '★ 非热股';
+        document.getElementById('ctx-block').textContent    = `🚫 屏蔽 ${ctxTarget}`;
+
+        ctxMenu.style.display = 'block';
+        // 防止菜单超出视口
+        const x = Math.min(e.clientX, window.innerWidth  - ctxMenu.offsetWidth  - 4);
+        const y = Math.min(e.clientY, window.innerHeight - ctxMenu.offsetHeight - 4);
+        ctxMenu.style.left = x + 'px';
+        ctxMenu.style.top  = y + 'px';
+    });
+
+    document.getElementById('ctx-block').addEventListener('click', () => {
+        if (ctxTarget) {
+            blockStock(ctxTarget);
+            renderBlockList();
+        }
+        ctxMenu.style.display = 'none';
+    });
+
+    // 点击其他地方关闭右键菜单
+    document.addEventListener('click', () => { ctxMenu.style.display = 'none'; });
+    document.addEventListener('contextmenu', e => {
+        if (!e.target.closest('#content')) ctxMenu.style.display = 'none';
+    });
+
+    // Enter 键提交手动屏蔽
+    document.getElementById('manual-block-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') addManualBlock();
+    });
+
+    // ── Ranking 数据（置顶规则） ──
     async function fetchRankingData() {
         try {
             const res = await fetch('/api/ranking');
             if (!res.ok) return;
             const rows = await res.json();
 
-            // 第一优先级：|change_amount| > 1
             const newMoveStocks = new Set(
                 rows.filter(r => Math.abs(Number(r.change_amount)) > 1).map(r => r.symbol)
             );
 
-            // 第二优先级：涨跌榜前50+50，排除已在 moveStocks 的
-            const sorted     = [...rows].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
-            const top50up    = sorted.slice(0, 50).map(r => r.symbol);
-            const top50down  = sorted.slice(-50).map(r => r.symbol);
+            const sorted    = [...rows].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
+            const top50up   = sorted.slice(0, 50).map(r => r.symbol);
+            const top50down = sorted.slice(-50).map(r => r.symbol);
             const newHotStocks = new Set(
                 [...top50up, ...top50down].filter(s => !newMoveStocks.has(s))
             );
@@ -393,7 +670,6 @@
         }
     }
 
-    // 计算每只股票买+卖 L1-L6 最新挂单量合计及单档最大值
     function calcBookVolMap(data) {
         const latestByKey = {};
         data.forEach(r => {
@@ -405,7 +681,6 @@
                 latestByKey[key] = r;
             }
         });
-
         const map = {};
         Object.values(latestByKey).forEach(r => {
             const code = r.stock_code;
@@ -417,10 +692,15 @@
         return map;
     }
 
-    function applyFilters(data) {
-        const bookVolMap = calcBookVolMap(data);
-        const maxBookVol = parseFloat(document.getElementById('filter-max-book-vol').value);
+    const TREND_LABELS = {
+        new_entry: { text: '新增大单', cls: 'tag-new' },
+        changed:   { text: '大单变化', cls: 'tag-changed' },
+        stable:    { text: '持稳',     cls: 'tag-stable' },
+    };
 
+    function applyFilters(data) {
+        const bookVolMap  = calcBookVolMap(data);
+        const maxBookVol  = parseFloat(document.getElementById('filter-max-book-vol').value);
         const side        = document.getElementById('filter-side').value;
         const trend       = document.getElementById('filter-trend').value;
         const symbol      = document.getElementById('filter-symbol').value.trim().toUpperCase();
@@ -433,7 +713,10 @@
         const maxTradeVol = parseFloat(document.getElementById('filter-max-trade-vol').value);
 
         return data.filter(r => {
-            // 屏蔽总挂单超阈值（豁免：单档占比>=80%）
+            // 手动屏蔽（localStorage）
+            if (blockedStocks.has(r.stock_code)) return false;
+
+            // 总挂单量屏蔽（豁免：单档占比>=80%）
             if (!isNaN(maxBookVol) && maxBookVol > 0) {
                 const info = bookVolMap[r.stock_code];
                 if (info && info.total > maxBookVol) {
@@ -480,53 +763,35 @@
         if (isNaN(v)) return '—';
         return v >= 1000 ? v.toLocaleString() : String(v);
     }
-
     function fmtPrice(v) {
         v = Number(v);
         return isNaN(v) ? '—' : v.toFixed(2);
     }
-
     function fmtPct(v) {
         v = Number(v);
         if (isNaN(v) || v === 0) return '';
         return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
     }
-
     function fmtTime(s) {
         if (!s) return '—';
-        const d = new Date(s);
-        return d.toLocaleTimeString('zh-CN', { hour12: false });
+        return new Date(s).toLocaleTimeString('zh-CN', { hour12: false });
     }
 
     function buildChangeCell(row) {
         const tt = row.trend_type;
         if (tt === 'new_entry') return '<span style="color:#555">首次出现</span>';
         if (tt === 'stable')    return '<span style="color:#555">持稳</span>';
-
         const parts = [];
-
         const pPct = Number(row.price_change_ratio);
         if (Math.abs(pPct) >= 1 && row.prev_price != null) {
-            const arrow = pPct > 0
-                ? '<span class="arrow-up">↗</span>'
-                : '<span class="arrow-down">↘</span>';
-            parts.push(
-                `价 ${fmtPrice(row.prev_price)}→${fmtPrice(row.price)} ${arrow} `
-                + `<span class="${pPct > 0 ? 'up' : 'down'}">${fmtPct(pPct)}</span>`
-            );
+            const arrow = pPct > 0 ? '<span class="arrow-up">↗</span>' : '<span class="arrow-down">↘</span>';
+            parts.push(`价 ${fmtPrice(row.prev_price)}→${fmtPrice(row.price)} ${arrow} <span class="${pPct > 0 ? 'up' : 'down'}">${fmtPct(pPct)}</span>`);
         }
-
         const vPct = Number(row.volume_change_ratio);
         if (Math.abs(vPct) >= 20 && row.prev_volume != null) {
-            const arrow = vPct > 0
-                ? '<span class="arrow-up">↑</span>'
-                : '<span class="arrow-down">↓</span>';
-            parts.push(
-                `量 ${fmtVol(row.prev_volume)}→${fmtVol(row.volume)} ${arrow} `
-                + `<span class="${vPct > 0 ? 'up' : 'down'}">${fmtPct(vPct)}</span>`
-            );
+            const arrow = vPct > 0 ? '<span class="arrow-up">↑</span>' : '<span class="arrow-down">↓</span>';
+            parts.push(`量 ${fmtVol(row.prev_volume)}→${fmtVol(row.volume)} ${arrow} <span class="${vPct > 0 ? 'up' : 'down'}">${fmtPct(vPct)}</span>`);
         }
-
         const ld = Number(row.level_delta);
         if (ld !== 0 && row.prev_level != null) {
             const dir = ld < 0
@@ -534,9 +799,7 @@
                 : `<span class="arrow-down">↓后退${Math.abs(ld)}档</span>`;
             parts.push(`档 L${row.prev_level}→L${row.level} ${dir}`);
         }
-
-        if (parts.length === 0) return '<span style="color:#555">微变</span>';
-        return parts.join('&emsp;');
+        return parts.length ? parts.join('&emsp;') : '<span style="color:#555">微变</span>';
     }
 
     // pinType: 'move' | 'hot' | null
@@ -557,16 +820,15 @@
             rowCls = 'pin-hot';
             mark   = '<span style="color:#ffd700;margin-right:3px">★</span>';
         } else {
-            // 普通行保留一次性 flash
             rowCls = flashIds[row.id] === 'chg' ? 'flash-chg'
                    : flashIds[row.id] === 'new' ? 'flash-new' : '';
         }
-
         if (isDivider) rowCls += ' group-divider';
 
-        return `<tr class="${rowCls.trim()}">
-            <td>${i + 1}</td>
-            <td class="symbol">${mark}${row.stock_code}</td>
+        // data-code 供右键菜单读取
+        return `<tr class="${rowCls.trim()}" data-code="${row.stock_code}">
+            <td>${i}</td>
+            <td><div class="symbol-cell"><span class="symbol">${mark}${row.stock_code}</span><button class="btn-block-inline" onclick="blockStock('${row.stock_code}');renderBlockList()" title="屏蔽此股票">×</button></div></td>
             <td>${sideEl}</td>
             <td><span class="level-badge">L${row.level}</span></td>
             <td>${fmtPrice(row.price)}</td>
@@ -589,45 +851,40 @@
             return;
         }
 
-        // 三组分层
         const moveRows  = sorted.filter(r => moveStocks.has(r.stock_code));
-        const hotRows   = sorted.filter(r => hotStocks.has(r.stock_code));  // 已排除 moveStocks
+        const hotRows   = sorted.filter(r => hotStocks.has(r.stock_code));
         const otherRows = sorted.filter(r => !moveStocks.has(r.stock_code) && !hotStocks.has(r.stock_code));
 
-        const thIcon = col => {
-            if (sortCol !== col) return '<span style="color:#444">↕</span>';
-            return sortDir === 'desc' ? '↓' : '↑';
-        };
+        const thIcon = col => sortCol !== col
+            ? '<span style="color:#444">↕</span>'
+            : (sortDir === 'desc' ? '↓' : '↑');
         const thCls = col => sortCol === col ? 'sorted' : '';
 
         let html = `<table>
             <thead><tr>
                 <th>#</th>
-                <th onclick="handleSort('stock_code')"       class="${thCls('stock_code')}">代码 ${thIcon('stock_code')}</th>
-                <th onclick="handleSort('alert_type')"       class="${thCls('alert_type')}">方向 ${thIcon('alert_type')}</th>
-                <th onclick="handleSort('level')"            class="${thCls('level')}">档位 ${thIcon('level')}</th>
-                <th onclick="handleSort('price')"            class="${thCls('price')}">挂单价 ${thIcon('price')}</th>
-                <th onclick="handleSort('volume')"           class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
-                <th onclick="handleSort('total_volume')"     class="${thCls('total_volume')}">交易量 ${thIcon('total_volume')}</th>
-                <th onclick="handleSort('price_ratio')"      class="${thCls('price_ratio')}">倍数 ${thIcon('price_ratio')}</th>
-                <th onclick="handleSort('trend_type')"       class="${thCls('trend_type')}">类型 ${thIcon('trend_type')}</th>
+                <th onclick="handleSort('stock_code')"   class="${thCls('stock_code')}">代码 ${thIcon('stock_code')}</th>
+                <th onclick="handleSort('alert_type')"   class="${thCls('alert_type')}">方向 ${thIcon('alert_type')}</th>
+                <th onclick="handleSort('level')"        class="${thCls('level')}">档位 ${thIcon('level')}</th>
+                <th onclick="handleSort('price')"        class="${thCls('price')}">挂单价 ${thIcon('price')}</th>
+                <th onclick="handleSort('volume')"       class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
+                <th onclick="handleSort('total_volume')" class="${thCls('total_volume')}">交易量 ${thIcon('total_volume')}</th>
+                <th onclick="handleSort('price_ratio')"  class="${thCls('price_ratio')}">倍数 ${thIcon('price_ratio')}</th>
+                <th onclick="handleSort('trend_type')"   class="${thCls('trend_type')}">类型 ${thIcon('trend_type')}</th>
                 <th style="min-width:320px;text-align:left">变化详情</th>
-                <th onclick="handleSort('created_at')"       class="${thCls('created_at')}">时间 ${thIcon('created_at')}</th>
+                <th onclick="handleSort('created_at')"   class="${thCls('created_at')}">时间 ${thIcon('created_at')}</th>
             </tr></thead>
             <tbody>`;
 
         let idx = 0;
-
         moveRows.forEach((row, i) => {
             const isDivider = i === moveRows.length - 1 && (hotRows.length > 0 || otherRows.length > 0);
             html += buildRow(row, ++idx, 'move', isDivider);
         });
-
         hotRows.forEach((row, i) => {
             const isDivider = i === hotRows.length - 1 && otherRows.length > 0;
             html += buildRow(row, ++idx, 'hot', isDivider);
         });
-
         otherRows.forEach(row => {
             html += buildRow(row, ++idx, null, false);
         });
@@ -637,14 +894,13 @@
     }
 
     function renderStats() {
-        const filtered = applyFilters(allData);
-        const total    = filtered.length;
-        const newCnt   = filtered.filter(r => r.trend_type === 'new_entry').length;
-        const chgCnt   = filtered.filter(r => r.trend_type === 'changed').length;
-        const stbCnt   = filtered.filter(r => r.trend_type === 'stable').length;
-        const bidCnt   = filtered.filter(r => r.alert_type === 'bid').length;
-        const askCnt   = filtered.filter(r => r.alert_type === 'ask').length;
-
+        const filtered   = applyFilters(allData);
+        const total      = filtered.length;
+        const newCnt     = filtered.filter(r => r.trend_type === 'new_entry').length;
+        const chgCnt     = filtered.filter(r => r.trend_type === 'changed').length;
+        const stbCnt     = filtered.filter(r => r.trend_type === 'stable').length;
+        const bidCnt     = filtered.filter(r => r.alert_type === 'bid').length;
+        const askCnt     = filtered.filter(r => r.alert_type === 'ask').length;
         const moveInView = new Set(filtered.filter(r => moveStocks.has(r.stock_code)).map(r => r.stock_code)).size;
         const hotInView  = new Set(filtered.filter(r => hotStocks.has(r.stock_code)).map(r => r.stock_code)).size;
 
@@ -657,20 +913,16 @@
             <div class="stat-item">卖盘 <span class="stat-val down">${askCnt}</span></div>
             ${moveInView > 0 ? `<div class="stat-item"><span class="badge badge-move">▲ 大波动 ${moveInView} 支</span></div>` : ''}
             ${hotInView  > 0 ? `<div class="stat-item"><span class="badge badge-hot">★ 热股 ${hotInView} 支</span></div>`  : ''}
+            ${blockedStocks.size > 0 ? `<div class="stat-item" style="color:#ef5350;font-size:11px">🚫 已屏蔽 ${blockedStocks.size} 支</div>` : ''}
         `;
     }
 
     function handleSort(col) {
-        if (sortCol === col) {
-            sortDir = sortDir === 'desc' ? 'asc' : 'desc';
-        } else {
-            sortCol = col;
-            sortDir = 'desc';
-        }
+        sortDir = sortCol === col ? (sortDir === 'desc' ? 'asc' : 'desc') : 'desc';
+        sortCol = col;
         renderTable();
     }
 
-    // 筛选变化时立即重渲染
     [
         'filter-side', 'filter-trend', 'filter-symbol', 'filter-ratio',
         'filter-min-price', 'filter-max-price',
@@ -682,22 +934,22 @@
         document.getElementById(id).addEventListener('change', () => { renderTable(); renderStats(); });
     });
 
-    // 时间范围和条数变化时重新请求
     ['filter-time', 'filter-limit'].forEach(id => {
         document.getElementById(id).addEventListener('change', () => fetchData());
     });
 
+    // 初始化按钮状态
+    saveBlocked();
+
     // 初始化：先拉 ranking，再拉大单
     fetchRankingData().then(() => fetchData());
 
-    // 主循环：每秒 tick
     setInterval(() => {
         rankingRefreshCountdown--;
         if (rankingRefreshCountdown <= 0) {
             rankingRefreshCountdown = RANKING_REFRESH_INTERVAL;
             fetchRankingData();
         }
-
         countdown--;
         if (countdown <= 0) {
             fetchData();
