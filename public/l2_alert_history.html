@@ -77,9 +77,29 @@
             margin-bottom: 14px;
             font-size: 12px;
             color: #666;
+            flex-wrap: wrap;
+            align-items: center;
         }
         .stat-item { display: flex; gap: 5px; align-items: center; }
         .stat-val { color: #aaa; font-weight: 600; }
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            padding: 2px 7px;
+            border-radius: 3px;
+        }
+        .badge-move {
+            color: #ff6b35;
+            border: 1px solid rgba(255,107,53,0.35);
+            background: rgba(255,107,53,0.08);
+        }
+        .badge-hot {
+            color: #ffd700;
+            border: 1px solid rgba(255,215,0,0.35);
+            background: rgba(255,215,0,0.08);
+        }
 
         .refresh-info { font-size: 12px; color: #666; }
 
@@ -154,11 +174,34 @@
         /* 时间 */
         .time-cell { color: #666; font-size: 12px; white-space: nowrap; }
 
-        /* flash 动画 */
-        @keyframes flashNew  { 0%{background:rgba(0,122,204,0.3)}  100%{background:transparent} }
-        @keyframes flashChg  { 0%{background:rgba(255,152,0,0.3)}  100%{background:transparent} }
+        /* ── 一次性 flash 动画 ── */
+        @keyframes flashNew { 0%{background:rgba(0,122,204,0.3)} 100%{background:transparent} }
+        @keyframes flashChg { 0%{background:rgba(255,152,0,0.3)} 100%{background:transparent} }
         .flash-new { animation: flashNew 0.8s ease-out; }
         .flash-chg { animation: flashChg 0.8s ease-out; }
+
+        /* ── 第一优先级：涨跌额 > 1（橙红色静态） ── */
+        tr.pin-move {
+            border-left: 3px solid #ff6b35;
+            background: rgba(255, 107, 53, 0.10) !important;
+        }
+
+        /* ── 第二优先级：涨跌榜热股（金色静态） ── */
+        tr.pin-hot {
+            border-left: 3px solid #ffd700;
+            background: rgba(255, 215, 0, 0.08) !important;
+        }
+
+        /* 分组分隔线 */
+        tr.group-divider td {
+            border-bottom: 2px solid rgba(255,255,255,0.12) !important;
+        }
+        tr.pin-move.group-divider td {
+            border-bottom: 2px solid rgba(255,107,53,0.4) !important;
+        }
+        tr.pin-hot.group-divider td {
+            border-bottom: 2px solid rgba(255,215,0,0.35) !important;
+        }
 
         .loading { text-align: center; padding: 40px; color: #666; }
         .error   { text-align: center; padding: 40px; color: #ef5350; }
@@ -264,18 +307,55 @@
 </div>
 
 <script>
-    let allData = [];
-    let sortCol = 'created_at';
-    let sortDir = 'desc';
+    let allData   = [];
+    let sortCol   = 'created_at';
+    let sortDir   = 'desc';
     let countdown = 1;
-    let knownIds = new Set();
-    let flashIds = {};   // id -> 'new' | 'chg'
+    let knownIds  = new Set();
+    let flashIds  = {};   // id -> 'new' | 'chg'
+
+    // ── 从 /api/ranking 派生的两个置顶集合 ──
+    // moveStocks：涨跌额绝对值 > 1（第一优先级，橙红）
+    // hotStocks ：涨跌榜前50+50（第二优先级，金色）
+    // 同时命中两者的股票归入 moveStocks
+    let moveStocks = new Set();
+    let hotStocks  = new Set();
+
+    let rankingRefreshCountdown = 0;
+    const RANKING_REFRESH_INTERVAL = 30;   // 每30秒刷新一次
 
     const TREND_LABELS = {
         new_entry: { text: '新增大单', cls: 'tag-new' },
         changed:   { text: '大单变化', cls: 'tag-changed' },
         stable:    { text: '持稳',     cls: 'tag-stable' },
     };
+
+    // ── 从 /api/ranking 一次性提取两个集合 ──
+    async function fetchRankingData() {
+        try {
+            const res = await fetch('/api/ranking');
+            if (!res.ok) return;
+            const rows = await res.json();
+
+            // 第一优先级：|change_amount| > 1
+            const newMoveStocks = new Set(
+                rows.filter(r => Math.abs(Number(r.change_amount)) > 1).map(r => r.symbol)
+            );
+
+            // 第二优先级：涨跌榜前50+50，排除已在 moveStocks 的
+            const sorted     = [...rows].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
+            const top50up    = sorted.slice(0, 50).map(r => r.symbol);
+            const top50down  = sorted.slice(-50).map(r => r.symbol);
+            const newHotStocks = new Set(
+                [...top50up, ...top50down].filter(s => !newMoveStocks.has(s))
+            );
+
+            moveStocks = newMoveStocks;
+            hotStocks  = newHotStocks;
+        } catch (e) {
+            console.error('[RankingData] fetch failed:', e);
+        }
+    }
 
     function buildApiUrl() {
         const mins  = document.getElementById('filter-time').value;
@@ -291,7 +371,6 @@
             if (!res.ok) throw new Error(res.statusText);
             const raw = await res.json();
 
-            // 检测新条目和变化条目，打 flash 标记
             const newFlash = {};
             raw.forEach(r => {
                 if (!knownIds.has(r.id)) {
@@ -314,9 +393,7 @@
         }
     }
 
-    // 计算每只股票买+卖 L1-L6 最新挂单量合计，以及单档最大值
-    // 每股票每侧每档位只取 created_at 最新的一条，避免历史记录重复累加
-    // 返回 map: stock_code -> { total, maxSingle }
+    // 计算每只股票买+卖 L1-L6 最新挂单量合计及单档最大值
     function calcBookVolMap(data) {
         const latestByKey = {};
         data.forEach(r => {
@@ -341,7 +418,6 @@
     }
 
     function applyFilters(data) {
-        // 预计算每股票 L1-L6 双侧总挂单量
         const bookVolMap = calcBookVolMap(data);
         const maxBookVol = parseFloat(document.getElementById('filter-max-book-vol').value);
 
@@ -357,8 +433,7 @@
         const maxTradeVol = parseFloat(document.getElementById('filter-max-trade-vol').value);
 
         return data.filter(r => {
-            // 屏蔽买+卖 L1-L6 总挂单量超过阈值的股票
-            // 豁免：若某单一档位挂单量占总量 >= 80%，说明高度集中，不屏蔽
+            // 屏蔽总挂单超阈值（豁免：单档占比>=80%）
             if (!isNaN(maxBookVol) && maxBookVol > 0) {
                 const info = bookVolMap[r.stock_code];
                 if (info && info.total > maxBookVol) {
@@ -430,7 +505,6 @@
 
         const parts = [];
 
-        // 价格变化
         const pPct = Number(row.price_change_ratio);
         if (Math.abs(pPct) >= 1 && row.prev_price != null) {
             const arrow = pPct > 0
@@ -442,7 +516,6 @@
             );
         }
 
-        // 量变化
         const vPct = Number(row.volume_change_ratio);
         if (Math.abs(vPct) >= 20 && row.prev_volume != null) {
             const arrow = vPct > 0
@@ -454,7 +527,6 @@
             );
         }
 
-        // 档位变化
         const ld = Number(row.level_delta);
         if (ld !== 0 && row.prev_level != null) {
             const dir = ld < 0
@@ -467,6 +539,46 @@
         return parts.join('&emsp;');
     }
 
+    // pinType: 'move' | 'hot' | null
+    function buildRow(row, i, pinType, isDivider) {
+        const trend   = TREND_LABELS[row.trend_type] || { text: row.trend_type, cls: 'tag-stable' };
+        const sideEl  = row.alert_type === 'bid'
+            ? '<span class="side-bid">买</span>'
+            : '<span class="side-ask">卖</span>';
+        const ratio   = Number(row.price_ratio);
+        const ratioEl = ratio > 0 ? `<span class="ratio">${ratio.toFixed(1)}x</span>` : '—';
+
+        let rowCls = '';
+        let mark   = '';
+        if (pinType === 'move') {
+            rowCls = 'pin-move';
+            mark   = '<span style="color:#ff6b35;margin-right:3px;font-size:11px">▲</span>';
+        } else if (pinType === 'hot') {
+            rowCls = 'pin-hot';
+            mark   = '<span style="color:#ffd700;margin-right:3px">★</span>';
+        } else {
+            // 普通行保留一次性 flash
+            rowCls = flashIds[row.id] === 'chg' ? 'flash-chg'
+                   : flashIds[row.id] === 'new' ? 'flash-new' : '';
+        }
+
+        if (isDivider) rowCls += ' group-divider';
+
+        return `<tr class="${rowCls.trim()}">
+            <td>${i + 1}</td>
+            <td class="symbol">${mark}${row.stock_code}</td>
+            <td>${sideEl}</td>
+            <td><span class="level-badge">L${row.level}</span></td>
+            <td>${fmtPrice(row.price)}</td>
+            <td>${fmtVol(row.volume)}</td>
+            <td>${fmtVol(row.total_volume)}</td>
+            <td>${ratioEl}</td>
+            <td><span class="tag ${trend.cls}">${trend.text}</span></td>
+            <td class="change-cell" style="text-align:left">${buildChangeCell(row)}</td>
+            <td class="time-cell">${fmtTime(row.created_at)}</td>
+        </tr>`;
+    }
+
     function renderTable() {
         const filtered = applyFilters(allData);
         const sorted   = sortData(filtered);
@@ -476,6 +588,11 @@
                 '<div class="empty">暂无符合条件的记录</div>';
             return;
         }
+
+        // 三组分层
+        const moveRows  = sorted.filter(r => moveStocks.has(r.stock_code));
+        const hotRows   = sorted.filter(r => hotStocks.has(r.stock_code));  // 已排除 moveStocks
+        const otherRows = sorted.filter(r => !moveStocks.has(r.stock_code) && !hotStocks.has(r.stock_code));
 
         const thIcon = col => {
             if (sortCol !== col) return '<span style="color:#444">↕</span>';
@@ -499,30 +616,20 @@
             </tr></thead>
             <tbody>`;
 
-        sorted.forEach((row, i) => {
-            const trend   = TREND_LABELS[row.trend_type] || { text: row.trend_type, cls: 'tag-stable' };
-            const sideEl  = row.alert_type === 'bid'
-                ? '<span class="side-bid">买</span>'
-                : '<span class="side-ask">卖</span>';
-            const ratio   = Number(row.price_ratio);
-            const ratioEl = ratio > 0 ? `<span class="ratio">${ratio.toFixed(1)}x</span>` : '—';
+        let idx = 0;
 
-            const flashCls = flashIds[row.id] === 'chg' ? 'flash-chg'
-                           : flashIds[row.id] === 'new' ? 'flash-new' : '';
+        moveRows.forEach((row, i) => {
+            const isDivider = i === moveRows.length - 1 && (hotRows.length > 0 || otherRows.length > 0);
+            html += buildRow(row, ++idx, 'move', isDivider);
+        });
 
-            html += `<tr class="${flashCls}">
-                <td>${i + 1}</td>
-                <td class="symbol">${row.stock_code}</td>
-                <td>${sideEl}</td>
-                <td><span class="level-badge">L${row.level}</span></td>
-                <td>${fmtPrice(row.price)}</td>
-                <td>${fmtVol(row.volume)}</td>
-                <td>${fmtVol(row.total_volume)}</td>
-                <td>${ratioEl}</td>
-                <td><span class="tag ${trend.cls}">${trend.text}</span></td>
-                <td class="change-cell" style="text-align:left">${buildChangeCell(row)}</td>
-                <td class="time-cell">${fmtTime(row.created_at)}</td>
-            </tr>`;
+        hotRows.forEach((row, i) => {
+            const isDivider = i === hotRows.length - 1 && otherRows.length > 0;
+            html += buildRow(row, ++idx, 'hot', isDivider);
+        });
+
+        otherRows.forEach(row => {
+            html += buildRow(row, ++idx, null, false);
         });
 
         html += '</tbody></table>';
@@ -538,6 +645,9 @@
         const bidCnt   = filtered.filter(r => r.alert_type === 'bid').length;
         const askCnt   = filtered.filter(r => r.alert_type === 'ask').length;
 
+        const moveInView = new Set(filtered.filter(r => moveStocks.has(r.stock_code)).map(r => r.stock_code)).size;
+        const hotInView  = new Set(filtered.filter(r => hotStocks.has(r.stock_code)).map(r => r.stock_code)).size;
+
         document.getElementById('stats-bar').innerHTML = `
             <div class="stat-item">共 <span class="stat-val">${total}</span> 条</div>
             <div class="stat-item">新增 <span class="stat-val" style="color:#4db8ff">${newCnt}</span></div>
@@ -545,6 +655,8 @@
             <div class="stat-item">持稳 <span class="stat-val">${stbCnt}</span></div>
             <div class="stat-item">买盘 <span class="stat-val up">${bidCnt}</span></div>
             <div class="stat-item">卖盘 <span class="stat-val down">${askCnt}</span></div>
+            ${moveInView > 0 ? `<div class="stat-item"><span class="badge badge-move">▲ 大波动 ${moveInView} 支</span></div>` : ''}
+            ${hotInView  > 0 ? `<div class="stat-item"><span class="badge badge-hot">★ 热股 ${hotInView} 支</span></div>`  : ''}
         `;
     }
 
@@ -558,7 +670,7 @@
         renderTable();
     }
 
-    // 筛选变化时立即重渲染（不重新请求）
+    // 筛选变化时立即重渲染
     [
         'filter-side', 'filter-trend', 'filter-symbol', 'filter-ratio',
         'filter-min-price', 'filter-max-price',
@@ -575,9 +687,17 @@
         document.getElementById(id).addEventListener('change', () => fetchData());
     });
 
-    // 倒计时刷新
-    fetchData();
+    // 初始化：先拉 ranking，再拉大单
+    fetchRankingData().then(() => fetchData());
+
+    // 主循环：每秒 tick
     setInterval(() => {
+        rankingRefreshCountdown--;
+        if (rankingRefreshCountdown <= 0) {
+            rankingRefreshCountdown = RANKING_REFRESH_INTERVAL;
+            fetchRankingData();
+        }
+
         countdown--;
         if (countdown <= 0) {
             fetchData();
