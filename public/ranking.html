@@ -278,7 +278,7 @@
     <script>
         let currentData = [];
         let symbolStates = {};
-        let countdown = 3;
+        let countdown = 5;
         let debounceTimer = null;
 
         // 双列各自的排序状态
@@ -352,16 +352,6 @@
             if (s.warning.direction !== side) return false;
             const c = get1mChange(item.symbol, Number(item.last_price));
             return c !== null && Math.abs(c) >= 0.5;
-        }
-
-        function handleDualSort(side, col) {
-            if (dualSort[side].col === col) {
-                dualSort[side].dir = dualSort[side].dir === 'desc' ? 'asc' : 'desc';
-            } else {
-                dualSort[side].col = col;
-                dualSort[side].dir = 'desc';
-            }
-            renderTable();
         }
 
         function toggleView() {
@@ -710,7 +700,7 @@
         }
 
         function resetTimer() {
-            countdown = 3;
+            countdown = 5;
             updateTimerDisplay();
         }
 
