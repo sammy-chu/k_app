@@ -1,10 +1,13 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const compression = require('compression');
 const { Pool } = require('pg');
 const { getFlexibleHills } = require('./scan-flexible-hills');
 const ConfigManager = require('./config-manager');
+
 const app = express();
+app.use(compression());
 
 // Enable CORS for development/preview
 app.use((req, res, next) => {
