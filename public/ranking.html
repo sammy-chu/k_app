@@ -619,8 +619,8 @@
                     return dir === 'desc' ? valB - valA : valA - valB;
                 };
 
-                // 不再限制渲染数量为 250 条
-                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)];
+                // 每侧最多显示 250 条
+                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)].slice(0, 250);
 
                 const icon = (c) => {
                     if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>';
