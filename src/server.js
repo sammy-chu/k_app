@@ -428,7 +428,8 @@ app.get('/api/l2-alert-history', async (req, res) => {
              h.trend_type, h.prev_price, h.prev_volume, h.prev_level,
              h.price_change_abs, h.price_change_ratio, h.volume_change_abs, h.volume_change_ratio,
              h.level_delta, h.alert_message, h.created_at,
-             COALESCE(d.total_volume, 0) as total_volume
+             COALESCE(d.total_volume, 0) AS total_volume,
+             d.open_price
       FROM ${table} h
       LEFT JOIN market_data.daily_summary d ON h.stock_code = d.symbol AND d.trade_date = CURRENT_DATE
       ${timeCondition}
@@ -437,7 +438,25 @@ app.get('/api/l2-alert-history', async (req, res) => {
     `;
 
     const { rows } = await pool.query(sql, params);
-    res.json(rows);
+
+    // 用 priceCache 实时计算当日涨跌幅，与 /api/ranking 逻辑保持一致
+    const enriched = rows.map(row => {
+      const openPrice = Number(row.open_price);
+      if (!openPrice) return { ...row, day_change_pct: null, day_change_amt: null };
+
+      const cached   = priceCache.get(row.stock_code);
+      const lastPrice = cached ? cached.price : Number(row.price); // 兜底用挂单价
+      const changeAmt = lastPrice - openPrice;
+      const changePct = Number((changeAmt / openPrice * 100).toFixed(2));
+
+      return {
+        ...row,
+        day_change_pct: changePct,
+        day_change_amt: Number(changeAmt.toFixed(3)),
+      };
+    });
+
+    res.json(enriched);
   } catch (e) {
     console.error('l2-alert-history query failed:', e);
     res.status(500).json({ error: e.message });

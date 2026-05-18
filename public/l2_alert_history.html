@@ -71,7 +71,6 @@
         }
         .filter-group select { cursor: pointer; }
 
-        /* 屏蔽管理按钮 */
         .block-btn {
             background: #2a2a2a;
             border: 1px solid #555;
@@ -133,29 +132,41 @@
         th.sorted { color: #007acc; }
         th:first-child, td:first-child { text-align: center; width: 36px; color: #555; }
         th:nth-child(2), td:nth-child(2) { text-align: left; }
-        th:nth-child(3), td:nth-child(3) { text-align: left; }
+        th:nth-child(4), td:nth-child(4) { text-align: left; }
         tr:last-child td { border-bottom: none; }
         tr:hover { background: #2a2a2a; }
         tr.pin-move { border-left: 3px solid #ff6b35; background: rgba(255,107,53,0.10) !important; }
         tr.pin-hot  { border-left: 3px solid #ffd700; background: rgba(255,215,0,0.08)  !important; }
         tr.pin-move:hover { background: rgba(255,107,53,0.16) !important; }
         tr.pin-hot:hover  { background: rgba(255,215,0,0.13)  !important; }
-        tr.group-divider td { border-bottom: 2px solid rgba(255,255,255,0.1) !important; position: relative; }
-        tr.group-divider td:last-child::after {
-            content: "↑ 本次刷新界线";
-            position: absolute;
-            right: 12px;
-            bottom: -18px;
-            font-size: 11px;
-            color: #888;
-            pointer-events: none;
-        }
+
+        /* ── 分组分隔线（原有：pin区末行） ── */
+        tr.group-divider td { border-bottom: 2px solid rgba(255,255,255,0.1) !important; }
         tr.pin-move.group-divider td { border-bottom: 2px solid rgba(255,107,53,0.4) !important; }
         tr.pin-hot.group-divider td  { border-bottom: 2px solid rgba(255,215,0,0.35)  !important; }
 
+        /* ── 功能4：刷新分隔线 ── */
+        tr.refresh-divider td {
+            border-bottom: 2px dashed rgba(100,180,255,0.35) !important;
+            position: relative;
+        }
+        tr.refresh-divider td:last-child::after {
+            content: attr(data-refresh-label);
+            position: absolute;
+            right: 8px;
+            bottom: 3px;
+            font-size: 10px;
+            color: rgba(100,180,255,0.55);
+            pointer-events: none;
+            white-space: nowrap;
+        }
+        /* 当分组分隔与刷新分隔重叠时，蓝色虚线优先展示 */
+        tr.refresh-divider.group-divider td {
+            border-bottom: 2px dashed rgba(100,180,255,0.45) !important;
+        }
+
         .symbol { font-weight: 600; color: #fff; }
 
-        /* 代码列屏蔽按钮：平时隐藏，行 hover 时显示 */
         .symbol-cell { display: flex; align-items: center; gap: 5px; }
         .btn-block-inline {
             display: none;
@@ -206,10 +217,45 @@
         .ratio { color: #faac30; font-weight: 600; }
         .time-cell { color: #666; font-size: 12px; white-space: nowrap; }
 
+        /* 当日涨跌幅列 */
+        .chg-pct-cell { font-weight: 600; white-space: nowrap; font-size: 13px; }
+        .chg-pct-up   { color: #26a69a; }
+        .chg-pct-down { color: #ef5350; }
+        .chg-pct-flat { color: #666; }
+
+        /* ── 原有闪烁 ── */
         @keyframes flashNew { 0%{background:rgba(0,122,204,0.3)} 100%{background:transparent} }
         @keyframes flashChg { 0%{background:rgba(255,152,0,0.3)} 100%{background:transparent} }
         .flash-new { animation: flashNew 0.8s ease-out; }
         .flash-chg { animation: flashChg 0.8s ease-out; }
+
+        /* ── 功能3：1分钟大涨/大跌闪烁 ── */
+        @keyframes flashMoveUp {
+            0%   { background: rgba(38,166,154,0.55); }
+            60%  { background: rgba(38,166,154,0.30); }
+            100% { background: transparent; }
+        }
+        @keyframes flashMoveDown {
+            0%   { background: rgba(239,83,80,0.55); }
+            60%  { background: rgba(239,83,80,0.30); }
+            100% { background: transparent; }
+        }
+        /* 持续闪烁：只要 class 在，就保持有色背景（用 infinite alternate） */
+        @keyframes pulseMoveUp {
+            0%, 100% { background: rgba(38,166,154,0.20); }
+            50%       { background: rgba(38,166,154,0.42); }
+        }
+        @keyframes pulseMoveDown {
+            0%, 100% { background: rgba(239,83,80,0.20); }
+            50%       { background: rgba(239,83,80,0.42); }
+        }
+        .flash-move-up   { animation: pulseMoveUp   1.4s ease-in-out infinite !important; }
+        .flash-move-down { animation: pulseMoveDown  1.4s ease-in-out infinite !important; }
+        /* pin 行叠加闪烁：背景用动画覆盖 */
+        tr.pin-move.flash-move-up   { background: unset !important; animation: pulseMoveUp   1.4s ease-in-out infinite !important; }
+        tr.pin-hot.flash-move-up    { background: unset !important; animation: pulseMoveUp   1.4s ease-in-out infinite !important; }
+        tr.pin-move.flash-move-down { background: unset !important; animation: pulseMoveDown 1.4s ease-in-out infinite !important; }
+        tr.pin-hot.flash-move-down  { background: unset !important; animation: pulseMoveDown 1.4s ease-in-out infinite !important; }
 
         .loading { text-align: center; padding: 40px; color: #666; }
         .error   { text-align: center; padding: 40px; color: #ef5350; }
@@ -236,11 +282,7 @@
         }
         #ctx-menu .ctx-item:hover { background: #3a3a3a; }
         #ctx-menu .ctx-item.danger { color: #ef5350; }
-        #ctx-menu .ctx-sep {
-            height: 1px;
-            background: #3a3a3a;
-            margin: 4px 0;
-        }
+        #ctx-menu .ctx-sep { height: 1px; background: #3a3a3a; margin: 4px 0; }
 
         /* ── 屏蔽管理浮层 ── */
         #block-modal-overlay {
@@ -272,20 +314,9 @@
             font-size: 14px;
             color: #ddd;
         }
-        .modal-close {
-            background: none;
-            border: none;
-            color: #666;
-            font-size: 18px;
-            cursor: pointer;
-            line-height: 1;
-        }
+        .modal-close { background: none; border: none; color: #666; font-size: 18px; cursor: pointer; line-height: 1; }
         .modal-close:hover { color: #ddd; }
-        .modal-body {
-            flex: 1;
-            overflow-y: auto;
-            padding: 10px 16px;
-        }
+        .modal-body { flex: 1; overflow-y: auto; padding: 10px 16px; }
         .modal-empty { text-align: center; padding: 30px; color: #555; font-size: 13px; }
         .block-item {
             display: flex;
@@ -297,62 +328,16 @@
         }
         .block-item:last-child { border-bottom: none; }
         .block-item-code { color: #fff; font-weight: 600; }
-        .unblock-btn {
-            background: none;
-            border: 1px solid #555;
-            color: #aaa;
-            padding: 2px 8px;
-            border-radius: 3px;
-            font-size: 12px;
-            cursor: pointer;
-        }
+        .unblock-btn { background: none; border: 1px solid #555; color: #aaa; padding: 2px 8px; border-radius: 3px; font-size: 12px; cursor: pointer; }
         .unblock-btn:hover { border-color: #26a69a; color: #26a69a; }
-        .modal-footer {
-            padding: 10px 16px;
-            border-top: 1px solid #333;
-            display: flex;
-            justify-content: flex-end;
-            gap: 8px;
-        }
-        .modal-footer button {
-            padding: 5px 14px;
-            border-radius: 3px;
-            font-size: 13px;
-            cursor: pointer;
-            border: 1px solid #555;
-            background: none;
-            color: #aaa;
-        }
+        .modal-footer { padding: 10px 16px; border-top: 1px solid #333; display: flex; justify-content: flex-end; gap: 8px; }
+        .modal-footer button { padding: 5px 14px; border-radius: 3px; font-size: 13px; cursor: pointer; border: 1px solid #555; background: none; color: #aaa; }
         .modal-footer button:hover { border-color: #ddd; color: #ddd; }
         .modal-footer .btn-danger { border-color: #ef5350; color: #ef5350; }
         .modal-footer .btn-danger:hover { background: rgba(239,83,80,0.12); }
-
-        /* 手动添加输入行 */
-        .modal-add {
-            display: flex;
-            gap: 8px;
-            padding: 10px 16px;
-            border-bottom: 1px solid #333;
-        }
-        .modal-add input {
-            flex: 1;
-            background: #1a1a1a;
-            border: 1px solid #444;
-            color: #ddd;
-            padding: 5px 8px;
-            border-radius: 3px;
-            font-size: 13px;
-        }
-        .modal-add button {
-            background: none;
-            border: 1px solid #555;
-            color: #aaa;
-            padding: 5px 12px;
-            border-radius: 3px;
-            font-size: 13px;
-            cursor: pointer;
-            white-space: nowrap;
-        }
+        .modal-add { display: flex; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #333; }
+        .modal-add input { flex: 1; background: #1a1a1a; border: 1px solid #444; color: #ddd; padding: 5px 8px; border-radius: 3px; font-size: 13px; }
+        .modal-add button { background: none; border: 1px solid #555; color: #aaa; padding: 5px 12px; border-radius: 3px; font-size: 13px; cursor: pointer; white-space: nowrap; }
         .modal-add button:hover { border-color: #ef5350; color: #ef5350; }
 
         @media (max-width: 900px) {
@@ -421,6 +406,13 @@
             <input type="number" id="filter-min-price" placeholder="最低" style="width:60px" min="0" step="0.001">
             <span style="color:#666">-</span>
             <input type="number" id="filter-max-price" placeholder="最高" style="width:60px" min="0" step="0.001">
+        </div>
+        <!-- ── 功能2：当日涨跌幅筛选 ── -->
+        <div class="filter-group">
+            <label>涨跌幅绝对值%</label>
+            <input type="number" id="filter-min-chg-pct" placeholder="最小" style="width:58px" step="0.1" title="当日涨跌幅绝对值最小，如 3">
+            <span style="color:#666">-</span>
+            <input type="number" id="filter-max-chg-pct" placeholder="最大" style="width:58px" step="0.1" title="当日涨跌幅绝对值最大，如 10">
         </div>
         <div class="filter-group">
             <label>挂单量</label>
@@ -494,19 +486,67 @@
     let flashIds  = {};
 
     // ── 置顶集合（来自 /api/ranking） ──
-    let moveStocks = new Set();   // 涨跌额 > 1，第一优先级
-    let hotStocks  = new Set();   // 涨跌榜前50+50，第二优先级
+    let moveStocks = new Set();
+    let hotStocks  = new Set();
 
+    // ── 功能5：刷新间隔改为 120 秒 ──
     let rankingRefreshCountdown = 0;
-    const RANKING_REFRESH_INTERVAL = 30;
+    const RANKING_REFRESH_INTERVAL = 120;
 
-    // ── 屏蔽集合（来自 localStorage，仅本机） ──
+    // ── 功能3：1分钟价格快照 { stockCode: { price, ts } } ──
+    // 记录每支股票首次（本轮）出现时的价格和时间，用于检测1分钟涨跌是否超过5毛
+    let priceSnapshot = {};   // stockCode -> { price: number, ts: number }
+    // 当前活跃的1分钟大波动集合
+    let activeMove1min = {};  // stockCode -> 'up'|'down'
+
+    // 每 15 秒扫描一次快照，判断是否在1分钟内涨跌超过0.5
+    function checkPriceSnapshots() {
+        const now = Date.now();
+        const newActive = {};
+        allData.forEach(r => {
+            const code    = r.stock_code;
+            const curPrice = Number(r.price);
+            if (isNaN(curPrice)) return;
+
+            const snap = priceSnapshot[code];
+            if (!snap) {
+                // 首次见到：建立快照
+                priceSnapshot[code] = { price: curPrice, ts: now };
+                return;
+            }
+
+            const elapsed = (now - snap.ts) / 1000; // 秒
+            const diff    = curPrice - snap.price;
+
+            if (elapsed <= 60) {
+                // 在1分钟窗口内，判断涨跌
+                if (diff >= 0.5)       newActive[code] = 'up';
+                else if (diff <= -0.5) newActive[code] = 'down';
+            } else {
+                // 超过1分钟：用当前价格更新快照，重新开始计时
+                priceSnapshot[code] = { price: curPrice, ts: now };
+            }
+        });
+        activeMove1min = newActive;
+        // 更新已渲染行的 class（不重绘整个表，只更新 class）
+        applyMove1minClasses();
+    }
+
+    function applyMove1minClasses() {
+        document.querySelectorAll('tr[data-code]').forEach(tr => {
+            const code = tr.dataset.code;
+            tr.classList.remove('flash-move-up', 'flash-move-down');
+            if (activeMove1min[code] === 'up')   tr.classList.add('flash-move-up');
+            if (activeMove1min[code] === 'down')  tr.classList.add('flash-move-down');
+        });
+    }
+
+    // ── 屏蔽集合 ──
     const LS_KEY = 'l2_blocked_stocks';
     let blockedStocks = new Set(JSON.parse(localStorage.getItem(LS_KEY) || '[]'));
 
     function saveBlocked() {
         localStorage.setItem(LS_KEY, JSON.stringify([...blockedStocks]));
-        // 更新屏蔽管理按钮样式
         const btn = document.getElementById('btn-manage-block');
         if (blockedStocks.size > 0) {
             btn.classList.add('has-blocked');
@@ -550,7 +590,6 @@
         renderBlockList();
     }
 
-    // ── 屏蔽管理浮层 ──
     function openBlockModal() {
         renderBlockList();
         document.getElementById('block-modal-overlay').classList.add('open');
@@ -587,12 +626,11 @@
 
         const isMove = moveStocks.has(ctxTarget);
         const isHot  = hotStocks.has(ctxTarget);
-        document.getElementById('ctx-pin-move').textContent = isMove ? '▲ 涨跌额 > 1（大波动置顶中）' : '▲ 非大波动股票';
-        document.getElementById('ctx-pin-hot').textContent  = isHot  ? '★ 涨跌榜热股（置顶中）'       : '★ 非热股';
+        document.getElementById('ctx-pin-move').textContent = isMove ? '▲ 大波动置顶（置顶中）' : '▲ 非大波动股票';
+        document.getElementById('ctx-pin-hot').textContent  = isHot  ? '★ 涨跌榜热股（置顶中）' : '★ 非热股';
         document.getElementById('ctx-block').textContent    = `🚫 屏蔽 ${ctxTarget}`;
 
         ctxMenu.style.display = 'block';
-        // 防止菜单超出视口
         const x = Math.min(e.clientX, window.innerWidth  - ctxMenu.offsetWidth  - 4);
         const y = Math.min(e.clientY, window.innerHeight - ctxMenu.offsetHeight - 4);
         ctxMenu.style.left = x + 'px';
@@ -600,33 +638,42 @@
     });
 
     document.getElementById('ctx-block').addEventListener('click', () => {
-        if (ctxTarget) {
-            blockStock(ctxTarget);
-            renderBlockList();
-        }
+        if (ctxTarget) { blockStock(ctxTarget); renderBlockList(); }
         ctxMenu.style.display = 'none';
     });
 
-    // 点击其他地方关闭右键菜单
     document.addEventListener('click', () => { ctxMenu.style.display = 'none'; });
     document.addEventListener('contextmenu', e => {
         if (!e.target.closest('#content')) ctxMenu.style.display = 'none';
     });
 
-    // Enter 键提交手动屏蔽
     document.getElementById('manual-block-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') addManualBlock();
     });
 
-    // ── Ranking 数据（置顶规则） ──
+    // ── 功能5：分价格区间的 moveStocks 判定 ──
+    function isMoveStock(r) {
+        const price     = Number(r.last_price || r.price) || 0;
+        const changeAmt = Math.abs(Number(r.change_amount));
+        const changePct = Math.abs(Number(r.change_pct));
+
+        if (price < 20)   return changeAmt > 0.2  && changePct > 2.0;
+        if (price < 100)  return changeAmt > 0.5  && changePct > 1.0;
+        if (price < 300)  return changeAmt > 1.0  && changePct > 0.5;
+        if (price < 600)  return changeAmt > 1.5  && changePct > 0.35;
+        /* >= 600 */       return changeAmt > 2.0  && changePct > 0.3;
+    }
+
+    // ── Ranking 数据 ──
     async function fetchRankingData() {
         try {
             const res = await fetch('/api/ranking');
             if (!res.ok) return;
             const rows = await res.json();
 
+            // 功能5：使用分区间规则
             const newMoveStocks = new Set(
-                rows.filter(r => Math.abs(Number(r.change_amount)) > 1).map(r => r.symbol)
+                rows.filter(r => isMoveStock(r)).map(r => r.symbol)
             );
 
             const sorted    = [...rows].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
@@ -651,6 +698,9 @@
         return `/api/l2-alert-history?${params}`;
     }
 
+    // 记录每次刷新的时间戳，用于功能4的分隔线标注
+    let lastRefreshTime = null;
+
     async function fetchData() {
         try {
             const res = await fetch(buildApiUrl());
@@ -667,8 +717,11 @@
             flashIds = newFlash;
 
             allData = raw;
+            lastRefreshTime = new Date();
             renderTable();
             renderStats();
+            // 功能3：拿到新数据后立即做一次价格快照检查
+            checkPriceSnapshots();
             countdown = 1;
         } catch (e) {
             console.error('fetch error:', e);
@@ -716,16 +769,17 @@
         const ratio       = parseFloat(document.getElementById('filter-ratio').value) || 0;
         const minPrice    = parseFloat(document.getElementById('filter-min-price').value);
         const maxPrice    = parseFloat(document.getElementById('filter-max-price').value);
+        // 功能2：涨跌幅筛选
+        const minChgPct   = parseFloat(document.getElementById('filter-min-chg-pct').value);
+        const maxChgPct   = parseFloat(document.getElementById('filter-max-chg-pct').value);
         const minVolume   = parseFloat(document.getElementById('filter-min-volume').value);
         const maxVolume   = parseFloat(document.getElementById('filter-max-volume').value);
         const minTradeVol = parseFloat(document.getElementById('filter-min-trade-vol').value);
         const maxTradeVol = parseFloat(document.getElementById('filter-max-trade-vol').value);
 
         return data.filter(r => {
-            // 手动屏蔽（localStorage）
             if (blockedStocks.has(r.stock_code)) return false;
 
-            // 总挂单量屏蔽（豁免：单档占比>=80%）
             if (!isNaN(maxBookVol) && maxBookVol > 0) {
                 const info = bookVolMap[r.stock_code];
                 if (info && info.total > maxBookVol) {
@@ -742,6 +796,11 @@
             const price = Number(r.price) || 0;
             if (!isNaN(minPrice) && price < minPrice) return false;
             if (!isNaN(maxPrice) && price > maxPrice) return false;
+
+            // 功能2：当日涨跌幅过滤（字段：day_change_pct，由后端 SQL JOIN 补充）
+            const chgPct = Math.abs(Number(r.day_change_pct));
+            if (!isNaN(minChgPct) && !isNaN(chgPct) && chgPct < minChgPct) return false;
+            if (!isNaN(maxChgPct) && !isNaN(chgPct) && chgPct > maxChgPct) return false;
 
             const volume = Number(r.volume) || 0;
             if (!isNaN(minVolume) && volume < minVolume) return false;
@@ -781,6 +840,12 @@
         if (isNaN(v) || v === 0) return '';
         return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
     }
+    function fmtDayPct(v) {
+        v = Number(v);
+        if (isNaN(v)) return '—';
+        if (v === 0) return '0.00%';
+        return (v > 0 ? '+' : '') + v.toFixed(2) + '%';
+    }
     function fmtTime(s) {
         if (!s) return '—';
         return new Date(s).toLocaleTimeString('zh-CN', { hour12: false });
@@ -811,8 +876,17 @@
         return parts.length ? parts.join('&emsp;') : '<span style="color:#555">微变</span>';
     }
 
+    // ── 功能4 辅助：格式化刷新标注文字 ──
+    function refreshLabel() {
+        if (!lastRefreshTime) return '↑ 刷新界线';
+        const t = lastRefreshTime.toLocaleTimeString('zh-CN', { hour12: false });
+        return `↑ ${t} 刷新`;
+    }
+
     // pinType: 'move' | 'hot' | null
-    function buildRow(row, i, pinType, isDivider) {
+    // isDivider: 原有分组分隔（组末行）
+    // isRefreshDivider: 功能4，刷新新旧界线
+    function buildRow(row, i, pinType, isDivider, isRefreshDivider) {
         const trend   = TREND_LABELS[row.trend_type] || { text: row.trend_type, cls: 'tag-stable' };
         const sideEl  = row.alert_type === 'bid'
             ? '<span class="side-bid">买</span>'
@@ -832,12 +906,37 @@
             rowCls = flashIds[row.id] === 'chg' ? 'flash-chg'
                    : flashIds[row.id] === 'new' ? 'flash-new' : '';
         }
+
+        // 功能3：1分钟闪烁 class（叠加，最高优先）
+        const moveFlash = activeMove1min[row.stock_code];
+        if (moveFlash === 'up')   rowCls += ' flash-move-up';
+        if (moveFlash === 'down') rowCls += ' flash-move-down';
+
+        // 分组分隔
         if (isDivider) rowCls += ' group-divider';
 
-        // data-code 供右键菜单读取
+        // 功能4：刷新界线（优先级高于分组分隔）
+        if (isRefreshDivider) rowCls += ' refresh-divider';
+
+        // 最后一列 td 加 data-refresh-label 属性供 CSS ::after 读取
+        const lastTdExtra = isRefreshDivider
+            ? ` data-refresh-label="${refreshLabel()}"`
+            : '';
+
+        const chgPct    = Number(row.day_change_pct);
+        let chgPctEl;
+        if (isNaN(chgPct) || row.day_change_pct == null) {
+            chgPctEl = '<span style="color:#444">—</span>';
+        } else {
+            const cls  = chgPct > 0 ? 'chg-pct-up' : chgPct < 0 ? 'chg-pct-down' : 'chg-pct-flat';
+            const sign = chgPct > 0 ? '+' : '';
+            chgPctEl = `<span class="chg-pct-cell ${cls}">${sign}${chgPct.toFixed(2)}%</span>`;
+        }
+
         return `<tr class="${rowCls.trim()}" data-code="${row.stock_code}">
             <td>${i}</td>
             <td><div class="symbol-cell"><span class="symbol">${mark}${row.stock_code}</span><button class="btn-block-inline" onclick="blockStock('${row.stock_code}');renderBlockList()" title="屏蔽此股票">×</button></div></td>
+            <td class="${Number(row.day_change_pct) > 0 ? 'up' : (Number(row.day_change_pct) < 0 ? 'down' : 'flat')}">${fmtDayPct(row.day_change_pct)}</td>
             <td>${sideEl}</td>
             <td><span class="level-badge">L${row.level}</span></td>
             <td>${fmtPrice(row.price)}</td>
@@ -845,9 +944,24 @@
             <td>${fmtVol(row.total_volume)}</td>
             <td>${ratioEl}</td>
             <td><span class="tag ${trend.cls}">${trend.text}</span></td>
+            <td>${chgPctEl}</td>
             <td class="change-cell" style="text-align:left">${buildChangeCell(row)}</td>
-            <td class="time-cell">${fmtTime(row.created_at)}</td>
+            <td class="time-cell"${lastTdExtra}>${fmtTime(row.created_at)}</td>
         </tr>`;
+    }
+
+    // ── 功能4：找到新/旧边界行索引 ──
+    // 给定一个行数组，返回"最后一条新记录"的索引（即刷新分隔线应画在哪行下面）
+    // 返回 -1 表示无需分隔（全是新 or 全是旧）
+    function findRefreshDividerIdx(rows) {
+        // 找到最后一个 flashIds 里存在的行
+        let lastNewIdx = -1;
+        for (let i = 0; i < rows.length; i++) {
+            if (flashIds[rows[i].id]) lastNewIdx = i;
+        }
+        // 只有在后面还有旧数据时才画分隔线
+        if (lastNewIdx === -1 || lastNewIdx === rows.length - 1) return -1;
+        return lastNewIdx;
     }
 
     function renderTable() {
@@ -864,6 +978,19 @@
         const hotRows   = sorted.filter(r => hotStocks.has(r.stock_code));
         const otherRows = sorted.filter(r => !moveStocks.has(r.stock_code) && !hotStocks.has(r.stock_code));
 
+        // 功能4：每组独立计算刷新分隔行位置
+        // 跨组：如果一组内没有旧数据，则检查下一组起始是否为旧数据
+        // 简化处理：在每组内找分隔；若全组都是新数据，则组末行同时承担刷新分隔职责
+        const moveDivIdx  = findRefreshDividerIdx(moveRows);
+        const hotDivIdx   = findRefreshDividerIdx(hotRows);
+        const otherDivIdx = findRefreshDividerIdx(otherRows);
+
+        // 跨组补充：move 组全是新 -> 若 hot[0] 是旧，则 move 末尾加刷新线
+        const moveAllNew   = moveRows.length > 0 && moveRows.every(r => flashIds[r.id]);
+        const hotAllNew    = hotRows.length  > 0 && hotRows.every(r  => flashIds[r.id]);
+        const hotFirstOld  = hotRows.length  > 0 && !flashIds[hotRows[0].id];
+        const otherFirstOld = otherRows.length > 0 && !flashIds[otherRows[0].id];
+
         const thIcon = col => sortCol !== col
             ? '<span style="color:#444">↕</span>'
             : (sortDir === 'desc' ? '↓' : '↑');
@@ -873,60 +1000,59 @@
             <thead><tr>
                 <th>#</th>
                 <th onclick="handleSort('stock_code')"   class="${thCls('stock_code')}">代码 ${thIcon('stock_code')}</th>
+                <th onclick="handleSort('day_change_pct')" class="${thCls('day_change_pct')}">涨跌幅 ${thIcon('day_change_pct')}</th>
                 <th onclick="handleSort('alert_type')"   class="${thCls('alert_type')}">方向 ${thIcon('alert_type')}</th>
                 <th onclick="handleSort('level')"        class="${thCls('level')}">档位 ${thIcon('level')}</th>
                 <th onclick="handleSort('price')"        class="${thCls('price')}">挂单价 ${thIcon('price')}</th>
                 <th onclick="handleSort('volume')"       class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
                 <th onclick="handleSort('total_volume')" class="${thCls('total_volume')}">交易量 ${thIcon('total_volume')}</th>
                 <th onclick="handleSort('price_ratio')"  class="${thCls('price_ratio')}">倍数 ${thIcon('price_ratio')}</th>
-                <th onclick="handleSort('trend_type')"   class="${thCls('trend_type')}">类型 ${thIcon('trend_type')}</th>
+                <th onclick="handleSort('trend_type')"    class="${thCls('trend_type')}">类型 ${thIcon('trend_type')}</th>
+                <th onclick="handleSort('day_change_pct')" class="${thCls('day_change_pct')}">涨跌幅 ${thIcon('day_change_pct')}</th>
                 <th style="min-width:320px;text-align:left">变化详情</th>
                 <th onclick="handleSort('created_at')"   class="${thCls('created_at')}">时间 ${thIcon('created_at')}</th>
             </tr></thead>
             <tbody>`;
 
         let idx = 0;
-        let crossedBoundary = false;
+
+        // 记录是否已在某组内画过刷新分隔线，避免重复
+        let refreshDone = false;
 
         moveRows.forEach((row, i) => {
-            const isNew = !!flashIds[row.id];
-            const nextIsOld = i + 1 < moveRows.length && !flashIds[moveRows[i+1].id];
-            // 考虑跨组的边界：如果本组没遇到边界，且这是本组最后一条新数据，且下一组第一条是旧数据
-            const nextGroupOld = (i === moveRows.length - 1) && 
-                ((hotRows.length > 0 && !flashIds[hotRows[0].id]) || 
-                 (hotRows.length === 0 && otherRows.length > 0 && !flashIds[otherRows[0].id]));
-                 
-            const isRefreshDivider = isNew && (nextIsOld || nextGroupOld) && !crossedBoundary;
-            if (isRefreshDivider) crossedBoundary = true;
-            
-            const isGroupDivider = i === moveRows.length - 1 && (hotRows.length > 0 || otherRows.length > 0);
-            html += buildRow(row, ++idx, 'move', isRefreshDivider || isGroupDivider);
+            const isGroupDivider   = i === moveRows.length - 1 && (hotRows.length > 0 || otherRows.length > 0);
+            let   isRefreshDivider = !refreshDone && i === moveDivIdx;
+            // 跨组：move 全新 且 下一组第一行是旧数据
+            if (!isRefreshDivider && !refreshDone && i === moveRows.length - 1 && moveAllNew) {
+                if (hotFirstOld || (!hotRows.length && otherFirstOld)) {
+                    isRefreshDivider = true;
+                }
+            }
+            if (isRefreshDivider) refreshDone = true;
+            html += buildRow(row, ++idx, 'move', isGroupDivider, isRefreshDivider);
         });
 
         hotRows.forEach((row, i) => {
-            const isNew = !!flashIds[row.id];
-            const nextIsOld = i + 1 < hotRows.length && !flashIds[hotRows[i+1].id];
-            const nextGroupOld = (i === hotRows.length - 1) && (otherRows.length > 0 && !flashIds[otherRows[0].id]);
-            
-            const isRefreshDivider = isNew && (nextIsOld || nextGroupOld) && !crossedBoundary;
-            if (isRefreshDivider) crossedBoundary = true;
-
-            const isGroupDivider = i === hotRows.length - 1 && otherRows.length > 0;
-            html += buildRow(row, ++idx, 'hot', isRefreshDivider || isGroupDivider);
+            const isGroupDivider   = i === hotRows.length - 1 && otherRows.length > 0;
+            let   isRefreshDivider = !refreshDone && i === hotDivIdx;
+            if (!isRefreshDivider && !refreshDone && i === hotRows.length - 1 && hotAllNew) {
+                if (otherFirstOld) isRefreshDivider = true;
+            }
+            if (isRefreshDivider) refreshDone = true;
+            html += buildRow(row, ++idx, 'hot', isGroupDivider, isRefreshDivider);
         });
 
         otherRows.forEach((row, i) => {
-            const isNew = !!flashIds[row.id];
-            const nextIsOld = i + 1 < otherRows.length && !flashIds[otherRows[i+1].id];
-            
-            const isRefreshDivider = isNew && nextIsOld && !crossedBoundary;
-            if (isRefreshDivider) crossedBoundary = true;
-
-            html += buildRow(row, ++idx, null, isRefreshDivider);
+            const isRefreshDivider = !refreshDone && i === otherDivIdx;
+            if (isRefreshDivider) refreshDone = true;
+            html += buildRow(row, ++idx, null, false, isRefreshDivider);
         });
 
         html += '</tbody></table>';
         document.getElementById('content').innerHTML = html;
+
+        // 功能3：渲染完成后立即更新闪烁 class
+        applyMove1minClasses();
     }
 
     function renderStats() {
@@ -939,6 +1065,7 @@
         const askCnt     = filtered.filter(r => r.alert_type === 'ask').length;
         const moveInView = new Set(filtered.filter(r => moveStocks.has(r.stock_code)).map(r => r.stock_code)).size;
         const hotInView  = new Set(filtered.filter(r => hotStocks.has(r.stock_code)).map(r => r.stock_code)).size;
+        const move1minCnt = Object.keys(activeMove1min).length;
 
         document.getElementById('stats-bar').innerHTML = `
             <div class="stat-item">共 <span class="stat-val">${total}</span> 条</div>
@@ -949,6 +1076,7 @@
             <div class="stat-item">卖盘 <span class="stat-val down">${askCnt}</span></div>
             ${moveInView > 0 ? `<div class="stat-item"><span class="badge badge-move">▲ 大波动 ${moveInView} 支</span></div>` : ''}
             ${hotInView  > 0 ? `<div class="stat-item"><span class="badge badge-hot">★ 热股 ${hotInView} 支</span></div>`  : ''}
+            ${move1minCnt > 0 ? `<div class="stat-item"><span class="badge" style="color:#7fffd4;border:1px solid rgba(127,255,212,0.35);background:rgba(127,255,212,0.08)">⚡ 1分钟急动 ${move1minCnt} 支</span></div>` : ''}
             ${blockedStocks.size > 0 ? `<div class="stat-item" style="color:#ef5350;font-size:11px">🚫 已屏蔽 ${blockedStocks.size} 支</div>` : ''}
         `;
     }
@@ -962,6 +1090,7 @@
     [
         'filter-side', 'filter-trend', 'filter-symbol', 'filter-ratio',
         'filter-min-price', 'filter-max-price',
+        'filter-min-chg-pct', 'filter-max-chg-pct',   // 功能2
         'filter-min-volume', 'filter-max-volume',
         'filter-min-trade-vol', 'filter-max-trade-vol',
         'filter-max-book-vol'
@@ -974,10 +1103,8 @@
         document.getElementById(id).addEventListener('change', () => fetchData());
     });
 
-    // 初始化按钮状态
     saveBlocked();
 
-    // 初始化：先拉 ranking，再拉大单
     fetchRankingData().then(() => fetchData());
 
     setInterval(() => {
@@ -993,6 +1120,9 @@
             document.getElementById('refresh-timer').textContent = `${countdown}s 后刷新`;
         }
     }, 1000);
+
+    // 功能3：每15秒扫描一次价格快照（独立于大单刷新频率）
+    setInterval(checkPriceSnapshots, 15000);
 </script>
 </body>
 </html>
