@@ -140,7 +140,16 @@
         tr.pin-hot  { border-left: 3px solid #ffd700; background: rgba(255,215,0,0.08)  !important; }
         tr.pin-move:hover { background: rgba(255,107,53,0.16) !important; }
         tr.pin-hot:hover  { background: rgba(255,215,0,0.13)  !important; }
-        tr.group-divider td { border-bottom: 2px solid rgba(255,255,255,0.1) !important; }
+        tr.group-divider td { border-bottom: 2px solid rgba(255,255,255,0.1) !important; position: relative; }
+        tr.group-divider td:last-child::after {
+            content: "↑ 本次刷新界线";
+            position: absolute;
+            right: 12px;
+            bottom: -18px;
+            font-size: 11px;
+            color: #888;
+            pointer-events: none;
+        }
         tr.pin-move.group-divider td { border-bottom: 2px solid rgba(255,107,53,0.4) !important; }
         tr.pin-hot.group-divider td  { border-bottom: 2px solid rgba(255,215,0,0.35)  !important; }
 
@@ -877,16 +886,43 @@
             <tbody>`;
 
         let idx = 0;
+        let crossedBoundary = false;
+
         moveRows.forEach((row, i) => {
-            const isDivider = i === moveRows.length - 1 && (hotRows.length > 0 || otherRows.length > 0);
-            html += buildRow(row, ++idx, 'move', isDivider);
+            const isNew = !!flashIds[row.id];
+            const nextIsOld = i + 1 < moveRows.length && !flashIds[moveRows[i+1].id];
+            // 考虑跨组的边界：如果本组没遇到边界，且这是本组最后一条新数据，且下一组第一条是旧数据
+            const nextGroupOld = (i === moveRows.length - 1) && 
+                ((hotRows.length > 0 && !flashIds[hotRows[0].id]) || 
+                 (hotRows.length === 0 && otherRows.length > 0 && !flashIds[otherRows[0].id]));
+                 
+            const isRefreshDivider = isNew && (nextIsOld || nextGroupOld) && !crossedBoundary;
+            if (isRefreshDivider) crossedBoundary = true;
+            
+            const isGroupDivider = i === moveRows.length - 1 && (hotRows.length > 0 || otherRows.length > 0);
+            html += buildRow(row, ++idx, 'move', isRefreshDivider || isGroupDivider);
         });
+
         hotRows.forEach((row, i) => {
-            const isDivider = i === hotRows.length - 1 && otherRows.length > 0;
-            html += buildRow(row, ++idx, 'hot', isDivider);
+            const isNew = !!flashIds[row.id];
+            const nextIsOld = i + 1 < hotRows.length && !flashIds[hotRows[i+1].id];
+            const nextGroupOld = (i === hotRows.length - 1) && (otherRows.length > 0 && !flashIds[otherRows[0].id]);
+            
+            const isRefreshDivider = isNew && (nextIsOld || nextGroupOld) && !crossedBoundary;
+            if (isRefreshDivider) crossedBoundary = true;
+
+            const isGroupDivider = i === hotRows.length - 1 && otherRows.length > 0;
+            html += buildRow(row, ++idx, 'hot', isRefreshDivider || isGroupDivider);
         });
-        otherRows.forEach(row => {
-            html += buildRow(row, ++idx, null, false);
+
+        otherRows.forEach((row, i) => {
+            const isNew = !!flashIds[row.id];
+            const nextIsOld = i + 1 < otherRows.length && !flashIds[otherRows[i+1].id];
+            
+            const isRefreshDivider = isNew && nextIsOld && !crossedBoundary;
+            if (isRefreshDivider) crossedBoundary = true;
+
+            html += buildRow(row, ++idx, null, isRefreshDivider);
         });
 
         html += '</tbody></table>';
