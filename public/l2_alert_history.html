@@ -153,7 +153,7 @@
         tr.pin-move.group-divider td { border-bottom: 2px solid rgba(255,107,53,0.4) !important; }
         tr.pin-hot.group-divider td  { border-bottom: 2px solid rgba(255,215,0,0.35)  !important; }
 
-        /* 新行：蓝色背景 */
+        /* 新行:蓝色背景 */
         tr.is-new-batch { background: rgba(0,122,204,0.13) !important; }
         tr.is-new-batch:hover { background: rgba(0,122,204,0.22) !important; }
         tr.pin-move.is-new-batch { background: rgba(30,100,180,0.22) !important; }
@@ -164,7 +164,7 @@
 
         .symbol { font-weight: 600; color: #fff; }
 
-        /* 代码列屏蔽按钮：平时隐藏，行 hover 时显示 */
+        /* 代码列屏蔽按钮:平时隐藏,行 hover 时显示 */
         .symbol-cell { display: flex; align-items: center; gap: 5px; }
         .btn-block-inline {
             display: none;
@@ -183,6 +183,10 @@
         .up   { color: #26a69a; }
         .down { color: #ef5350; }
         .flat { color: #777; }
+
+        /* 日涨跌列 */
+        .day-change-cell { font-weight: 600; white-space: nowrap; }
+        .day-change-cell .pct { color: #888; font-weight: 400; font-size: 11px; margin-left: 3px; }
 
         .tag {
             display: inline-block;
@@ -224,7 +228,7 @@
         .error   { text-align: center; padding: 40px; color: #ef5350; }
         .empty   { text-align: center; padding: 30px; color: #555; font-size: 13px; }
 
-        /* ── 右键菜单 ── */
+        /* 右键菜单 */
         #ctx-menu {
             position: fixed;
             background: #2a2a2a;
@@ -251,7 +255,7 @@
             margin: 4px 0;
         }
 
-        /* ── 屏蔽管理浮层 ── */
+        /* 屏蔽管理浮层 */
         #block-modal-overlay {
             display: none;
             position: fixed;
@@ -445,6 +449,12 @@
             <input type="number" id="filter-max-trade-vol" placeholder="最大" style="width:70px" min="0" step="1">
         </div>
         <div class="filter-group">
+            <label>涨跌额</label>
+            <input type="number" id="filter-min-change-amt" placeholder="最小" style="width:60px" step="0.01" title="允许负数,如 -2 表示跌 2 元以上">
+            <span style="color:#666">-</span>
+            <input type="number" id="filter-max-change-amt" placeholder="最大" style="width:60px" step="0.01">
+        </div>
+        <div class="filter-group">
             <label>屏蔽总挂单超</label>
             <input type="number" id="filter-max-book-vol" value="50000" min="0" step="1000" style="width:80px">
         </div>
@@ -484,7 +494,7 @@
             <button class="modal-close" onclick="closeBlockModal()">×</button>
         </div>
         <div class="modal-add">
-            <input type="text" id="manual-block-input" placeholder="手动输入代码，如 BABA.BL">
+            <input type="text" id="manual-block-input" placeholder="手动输入代码,如 BABA.BL">
             <button onclick="addManualBlock()">添加屏蔽</button>
         </div>
         <div class="modal-body" id="block-list"></div>
@@ -506,13 +516,9 @@
     let flashIds = {};
     let knownIds  = new Set();
 
-    // 新行 id → 首次出现时间戳（ms）；超过 NEW_ROW_TTL 才从 Map 里删除
-    // 用 Map 累积而非每轮替换，蓝色背景持续显示直到过期
-    const NEW_ROW_TTL = 30000;  // 30 秒
-    let newRowIds = new Map();   // Map<id, firstSeenTs>
+    const NEW_ROW_TTL = 30000;
+    let newRowIds = new Map();
 
-    // ── 分隔线锚点：永久保持直到用户手动重置 ──
-    // dividerAnchorId = 分隔线下方第一条旧数据的 id
     let dividerAnchorId = null;
     let dividerTime     = null;
 
@@ -528,20 +534,17 @@
 
     let lastRefreshTime = null;
 
-    // ── 置顶集合 ──
     let moveStocks = new Set();
     let hotStocks  = new Set();
 
     let rankingRefreshCountdown = 0;
     const RANKING_REFRESH_INTERVAL = 120;
 
-    // ── 屏蔽集合（来自 localStorage，仅本机） ──
     const LS_KEY = 'l2_blocked_stocks';
     let blockedStocks = new Set(JSON.parse(localStorage.getItem(LS_KEY) || '[]'));
 
     function saveBlocked() {
         localStorage.setItem(LS_KEY, JSON.stringify([...blockedStocks]));
-        // 更新屏蔽管理按钮样式
         const btn = document.getElementById('btn-manage-block');
         if (blockedStocks.size > 0) {
             btn.classList.add('has-blocked');
@@ -568,7 +571,7 @@
     }
 
     function clearAllBlocked() {
-        if (!confirm('确认清空所有屏蔽股票？')) return;
+        if (!confirm('确认清空所有屏蔽股票?')) return;
         blockedStocks.clear();
         saveBlocked();
         renderTable();
@@ -585,7 +588,6 @@
         renderBlockList();
     }
 
-    // ── 屏蔽管理浮层 ──
     function openBlockModal() {
         renderBlockList();
         document.getElementById('block-modal-overlay').classList.add('open');
@@ -610,7 +612,6 @@
         `).join('');
     }
 
-    // ── 右键菜单 ──
     let ctxTarget = null;
     const ctxMenu = document.getElementById('ctx-menu');
 
@@ -622,12 +623,11 @@
 
         const isMove = moveStocks.has(ctxTarget);
         const isHot  = hotStocks.has(ctxTarget);
-        document.getElementById('ctx-pin-move').textContent = isMove ? '▲ 涨跌额 > 1（大波动置顶中）' : '▲ 非大波动股票';
-        document.getElementById('ctx-pin-hot').textContent  = isHot  ? '★ 涨跌榜热股（置顶中）'       : '★ 非热股';
+        document.getElementById('ctx-pin-move').textContent = isMove ? '▲ 涨跌额 > 1(大波动置顶中)' : '▲ 非大波动股票';
+        document.getElementById('ctx-pin-hot').textContent  = isHot  ? '★ 涨跌榜热股(置顶中)'       : '★ 非热股';
         document.getElementById('ctx-block').textContent    = `🚫 屏蔽 ${ctxTarget}`;
 
         ctxMenu.style.display = 'block';
-        // 防止菜单超出视口
         const x = Math.min(e.clientX, window.innerWidth  - ctxMenu.offsetWidth  - 4);
         const y = Math.min(e.clientY, window.innerHeight - ctxMenu.offsetHeight - 4);
         ctxMenu.style.left = x + 'px';
@@ -642,18 +642,15 @@
         ctxMenu.style.display = 'none';
     });
 
-    // 点击其他地方关闭右键菜单
     document.addEventListener('click', () => { ctxMenu.style.display = 'none'; });
     document.addEventListener('contextmenu', e => {
         if (!e.target.closest('#content')) ctxMenu.style.display = 'none';
     });
 
-    // Enter 键提交手动屏蔽
     document.getElementById('manual-block-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') addManualBlock();
     });
 
-    // ── Ranking 数据（置顶规则） ──
     async function fetchRankingData() {
         try {
             const res = await fetch('/api/ranking');
@@ -692,13 +689,10 @@
             if (!res.ok) throw new Error(res.statusText);
             const raw = await res.json();
 
-            // 1. 找出本轮新增的 id
-            // 首次加载时 knownIds 为空，所有 id 都算「新」但不应变蓝
             const isFirstLoad = knownIds.size === 0;
             const thisRoundNew = new Set();
             raw.forEach(r => { if (!knownIds.has(r.id)) thisRoundNew.add(r.id); });
 
-            // 2. 首次出现新数据时设置分隔线锚点（永久保持）
             if (thisRoundNew.size > 0 && dividerAnchorId === null && knownIds.size > 0) {
                 const sortedRaw = [...raw].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
                 const firstOld  = sortedRaw.find(r => !thisRoundNew.has(r.id));
@@ -709,19 +703,15 @@
                 }
             }
 
-            // 3. 累积 newRowIds（Map 记录首次出现时间），过期才移除
-            // 首次加载不标蓝，只更新 knownIds
             const now = Date.now();
             thisRoundNew.forEach(id => {
-                if (!isFirstLoad) newRowIds.set(id, now);  // 首次加载跳过，不变蓝
+                if (!isFirstLoad) newRowIds.set(id, now);
                 knownIds.add(id);
             });
-            // 清理过期的新行（超过 NEW_ROW_TTL）
             newRowIds.forEach((ts, id) => {
                 if (now - ts > NEW_ROW_TTL) newRowIds.delete(id);
             });
 
-            // 4. flashIds 供入场动画（只取本轮，Map 新 id 就是本轮的）
             const newFlash = {};
             thisRoundNew.forEach(id => {
                 const r = raw.find(x => x.id === id);
@@ -784,12 +774,13 @@
         const maxVolume   = parseFloat(document.getElementById('filter-max-volume').value);
         const minTradeVol = parseFloat(document.getElementById('filter-min-trade-vol').value);
         const maxTradeVol = parseFloat(document.getElementById('filter-max-trade-vol').value);
+        const minChgAmt   = parseFloat(document.getElementById('filter-min-change-amt').value);
+        const maxChgAmt   = parseFloat(document.getElementById('filter-max-change-amt').value);
+        const hasChgAmtFilter = !isNaN(minChgAmt) || !isNaN(maxChgAmt);
 
         return data.filter(r => {
-            // 手动屏蔽（localStorage）
             if (blockedStocks.has(r.stock_code)) return false;
 
-            // 总挂单量屏蔽（豁免：单档占比>=80%）
             if (!isNaN(maxBookVol) && maxBookVol > 0) {
                 const info = bookVolMap[r.stock_code];
                 if (info && info.total > maxBookVol) {
@@ -814,6 +805,14 @@
             const tradeVol = Number(r.total_volume) || 0;
             if (!isNaN(minTradeVol) && tradeVol < minTradeVol) return false;
             if (!isNaN(maxTradeVol) && tradeVol > maxTradeVol) return false;
+
+            // 涨跌额筛选:null 视为无数据,只要用户填了任一边界就排除
+            if (hasChgAmtFilter) {
+                if (r.day_change_amt == null) return false;
+                const amt = Number(r.day_change_amt);
+                if (!isNaN(minChgAmt) && amt < minChgAmt) return false;
+                if (!isNaN(maxChgAmt) && amt > maxChgAmt) return false;
+            }
 
             return true;
         });
@@ -850,6 +849,20 @@
         return new Date(s).toLocaleTimeString('zh-CN', { hour12: false });
     }
 
+    // 日涨跌单元格:金额 + 小字百分比,颜色随符号
+    function fmtDayChange(row) {
+        const amt = row.day_change_amt;
+        const pct = row.day_change_pct;
+        if (amt == null) return '<span style="color:#555">—</span>';
+        const a   = Number(amt);
+        const cls = a > 0 ? 'up' : (a < 0 ? 'down' : 'flat');
+        const sign = a > 0 ? '+' : '';
+        const pctStr = (pct == null || isNaN(Number(pct)))
+            ? ''
+            : `<span class="pct">${fmtPct(pct)}</span>`;
+        return `<span class="day-change-cell ${cls}">${sign}${a.toFixed(2)}${pctStr}</span>`;
+    }
+
     function buildChangeCell(row) {
         const tt = row.trend_type;
         if (tt === 'new_entry') return '<span style="color:#555">首次出现</span>';
@@ -875,7 +888,6 @@
         return parts.length ? parts.join('&emsp;') : '<span style="color:#555">微变</span>';
     }
 
-    // pinType: 'move' | 'hot' | null
     function buildRow(row, i, pinType, isGroupDivider, isDividerRow) {
         const trend   = TREND_LABELS[row.trend_type] || { text: row.trend_type, cls: 'tag-stable' };
         const sideEl  = row.alert_type === 'bid'
@@ -899,9 +911,7 @@
         if (newRowIds.has(row.id)) rowCls += ' is-new-batch';
         if (isGroupDivider) rowCls += ' group-divider';
         if (isDividerRow)   rowCls += ' refresh-divider';
-        const lastTdExtra = isDividerRow ? ` data-refresh-label="${dividerLabel()}"` : '';
 
-        // data-code 供右键菜单读取
         return `<tr class="${rowCls.trim()}" data-code="${row.stock_code}">
             <td>${i}</td>
             <td><div class="symbol-cell"><span class="symbol">${mark}${row.stock_code}</span><button class="btn-block-inline" onclick="blockStock('${row.stock_code}');renderBlockList()" title="屏蔽此股票">×</button></div></td>
@@ -911,13 +921,13 @@
             <td>${fmtVol(row.volume)}</td>
             <td>${fmtVol(row.total_volume)}</td>
             <td>${ratioEl}</td>
+            <td style="text-align:right">${fmtDayChange(row)}</td>
             <td><span class="tag ${trend.cls}">${trend.text}</span></td>
             <td class="change-cell" style="text-align:left">${buildChangeCell(row)}</td>
             <td class="time-cell">${fmtTime(row.created_at)}</td>
         </tr>`;
     }
 
-    // 在 rows 里找 dividerAnchorId 的位置，返回其前一行索引（在该行下边框画线），-1=不画
     function findDividerIdx(rows) {
         if (!dividerAnchorId) return -1;
         const anchorIdx = rows.findIndex(r => r.id === dividerAnchorId);
@@ -925,7 +935,6 @@
         return anchorIdx - 1;
     }
 
-    // anchor 不在本组但在后续组里，且本组全是新行 → 组末画跨组分隔线
     function needsCrossGroupDivider(group, nextGroups) {
         if (!dividerAnchorId || group.length === 0) return false;
         const anchorInNext = nextGroups.some(g => g.some(r => r.id === dividerAnchorId));
@@ -952,10 +961,6 @@
         const hotRows   = sorted.filter(r => hotStocks.has(r.stock_code));
         const otherRows = sorted.filter(r => !moveStocks.has(r.stock_code) && !hotStocks.has(r.stock_code));
 
-        const moveDivIdx  = findDividerIdx(moveRows);
-        const hotDivIdx   = findDividerIdx(hotRows);
-        const otherDivIdx = findDividerIdx(otherRows);
-
         const thIcon = col => sortCol !== col
             ? '<span style="color:#444">↕</span>'
             : (sortDir === 'desc' ? '↓' : '↑');
@@ -964,16 +969,17 @@
         let html = `<table>
             <thead><tr>
                 <th>#</th>
-                <th onclick="handleSort('stock_code')"   class="${thCls('stock_code')}">代码 ${thIcon('stock_code')}</th>
-                <th onclick="handleSort('alert_type')"   class="${thCls('alert_type')}">方向 ${thIcon('alert_type')}</th>
-                <th onclick="handleSort('level')"        class="${thCls('level')}">档位 ${thIcon('level')}</th>
-                <th onclick="handleSort('price')"        class="${thCls('price')}">挂单价 ${thIcon('price')}</th>
-                <th onclick="handleSort('volume')"       class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
-                <th onclick="handleSort('total_volume')" class="${thCls('total_volume')}">交易量 ${thIcon('total_volume')}</th>
-                <th onclick="handleSort('price_ratio')"  class="${thCls('price_ratio')}">倍数 ${thIcon('price_ratio')}</th>
-                <th onclick="handleSort('trend_type')"   class="${thCls('trend_type')}">类型 ${thIcon('trend_type')}</th>
+                <th onclick="handleSort('stock_code')"     class="${thCls('stock_code')}">代码 ${thIcon('stock_code')}</th>
+                <th onclick="handleSort('alert_type')"     class="${thCls('alert_type')}">方向 ${thIcon('alert_type')}</th>
+                <th onclick="handleSort('level')"          class="${thCls('level')}">档位 ${thIcon('level')}</th>
+                <th onclick="handleSort('price')"          class="${thCls('price')}">挂单价 ${thIcon('price')}</th>
+                <th onclick="handleSort('volume')"         class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
+                <th onclick="handleSort('total_volume')"   class="${thCls('total_volume')}">交易量 ${thIcon('total_volume')}</th>
+                <th onclick="handleSort('price_ratio')"    class="${thCls('price_ratio')}">倍数 ${thIcon('price_ratio')}</th>
+                <th onclick="handleSort('day_change_amt')" class="${thCls('day_change_amt')}">日涨跌 ${thIcon('day_change_amt')}</th>
+                <th onclick="handleSort('trend_type')"     class="${thCls('trend_type')}">类型 ${thIcon('trend_type')}</th>
                 <th style="min-width:320px;text-align:left">变化详情</th>
-                <th onclick="handleSort('created_at')"   class="${thCls('created_at')}">时间 ${thIcon('created_at')}</th>
+                <th onclick="handleSort('created_at')"     class="${thCls('created_at')}">时间 ${thIcon('created_at')}</th>
             </tr></thead>
             <tbody>`;
 
@@ -1015,8 +1021,6 @@
         const moveInView = new Set(filtered.filter(r => moveStocks.has(r.stock_code)).map(r => r.stock_code)).size;
         const hotInView  = new Set(filtered.filter(r => hotStocks.has(r.stock_code)).map(r => r.stock_code)).size;
 
-        const newBatchCnt = filtered.filter(r => newRowIds.has(r.id)).length;
-
         document.getElementById('stats-bar').innerHTML = `
             <div class="stat-item">共 <span class="stat-val">${total}</span> 条</div>
             <div class="stat-item">新增 <span class="stat-val" style="color:#4db8ff">${newCnt}</span></div>
@@ -1030,6 +1034,8 @@
         `;
     }
 
+    function checkPriceSnapshots() { /* placeholder, 保持原调用兼容 */ }
+
     function handleSort(col) {
         sortDir = sortCol === col ? (sortDir === 'desc' ? 'asc' : 'desc') : 'desc';
         sortCol = col;
@@ -1041,6 +1047,7 @@
         'filter-min-price', 'filter-max-price',
         'filter-min-volume', 'filter-max-volume',
         'filter-min-trade-vol', 'filter-max-trade-vol',
+        'filter-min-change-amt', 'filter-max-change-amt',
         'filter-max-book-vol'
     ].forEach(id => {
         document.getElementById(id).addEventListener('input',  () => { renderTable(); renderStats(); });
@@ -1051,10 +1058,8 @@
         document.getElementById(id).addEventListener('change', () => { resetDivider(); fetchData(); });
     });
 
-    // 初始化按钮状态
     saveBlocked();
 
-    // 初始化：先拉 ranking，再拉大单
     fetchRankingData().then(() => fetchData());
 
     setInterval(() => {
