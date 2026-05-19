@@ -449,10 +449,8 @@
             <input type="number" id="filter-max-trade-vol" placeholder="最大" style="width:70px" min="0" step="1">
         </div>
         <div class="filter-group">
-            <label>涨跌额</label>
-            <input type="number" id="filter-min-change-amt" placeholder="最小" style="width:60px" step="0.01" title="允许负数,如 -2 表示跌 2 元以上">
-            <span style="color:#666">-</span>
-            <input type="number" id="filter-max-change-amt" placeholder="最大" style="width:60px" step="0.01">
+            <label>涨跌额绝对值 ≥</label>
+            <input type="number" id="filter-min-abs-change" placeholder="0" style="width:60px" min="0" step="0.01" title="按绝对值筛选:填 1 表示涨跌幅度 ≥1 元(涨跌都算)">
         </div>
         <div class="filter-group">
             <label>屏蔽总挂单超</label>
@@ -516,7 +514,7 @@
     let flashIds = {};
     let knownIds  = new Set();
 
-    const NEW_ROW_TTL = 30000;
+    const NEW_ROW_TTL = 60000;
     let newRowIds = new Map();
 
     let dividerAnchorId = null;
@@ -774,9 +772,8 @@
         const maxVolume   = parseFloat(document.getElementById('filter-max-volume').value);
         const minTradeVol = parseFloat(document.getElementById('filter-min-trade-vol').value);
         const maxTradeVol = parseFloat(document.getElementById('filter-max-trade-vol').value);
-        const minChgAmt   = parseFloat(document.getElementById('filter-min-change-amt').value);
-        const maxChgAmt   = parseFloat(document.getElementById('filter-max-change-amt').value);
-        const hasChgAmtFilter = !isNaN(minChgAmt) || !isNaN(maxChgAmt);
+        const minAbsChg   = parseFloat(document.getElementById('filter-min-abs-change').value);
+        const hasAbsChgFilter = !isNaN(minAbsChg) && minAbsChg > 0;
 
         return data.filter(r => {
             if (blockedStocks.has(r.stock_code)) return false;
@@ -806,12 +803,10 @@
             if (!isNaN(minTradeVol) && tradeVol < minTradeVol) return false;
             if (!isNaN(maxTradeVol) && tradeVol > maxTradeVol) return false;
 
-            // 涨跌额筛选:null 视为无数据,只要用户填了任一边界就排除
-            if (hasChgAmtFilter) {
+            // 涨跌额按绝对值筛选:0 或空时不生效
+            if (hasAbsChgFilter) {
                 if (r.day_change_amt == null) return false;
-                const amt = Number(r.day_change_amt);
-                if (!isNaN(minChgAmt) && amt < minChgAmt) return false;
-                if (!isNaN(maxChgAmt) && amt > maxChgAmt) return false;
+                if (Math.abs(Number(r.day_change_amt)) < minAbsChg) return false;
             }
 
             return true;
@@ -1047,7 +1042,7 @@
         'filter-min-price', 'filter-max-price',
         'filter-min-volume', 'filter-max-volume',
         'filter-min-trade-vol', 'filter-max-trade-vol',
-        'filter-min-change-amt', 'filter-max-change-amt',
+        'filter-min-abs-change',
         'filter-max-book-vol'
     ].forEach(id => {
         document.getElementById(id).addEventListener('input',  () => { renderTable(); renderStats(); });
