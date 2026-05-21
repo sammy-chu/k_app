@@ -141,6 +141,18 @@ async function ensureTables() {
     `);
 
     await client.query(`
+      CREATE TABLE IF NOT EXISTS intraday_volume_surge (
+        symbol        TEXT NOT NULL,
+        trade_date    DATE NOT NULL,
+        bucket_time   TIMESTAMPTZ NOT NULL,
+        window_vol    NUMERIC,
+        avg_daily_vol NUMERIC,
+        vol_ratio     NUMERIC,
+        PRIMARY KEY (symbol, trade_date)
+      );
+    `);
+
+    await client.query(`
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
         value TEXT,
@@ -660,6 +672,11 @@ app.get('/api/ranking', (req, res) => {
   }
 });
 
+// 当日分时放量 symbol 列表 API
+app.get('/api/volume-surge-today', (req, res) => {
+  res.json([...volumeSurgeToday]);
+});
+
 // === 大单监控筛选器 API ===
 app.get('/api/large-orders-screener', async (req, res) => {
   try {
@@ -1176,6 +1193,72 @@ async function scanAllVolumeAlerts() {
   }
 }
 
+// ── 分时放量监控 ──────────────────────────────────────────────────────────────
+
+// 当日已触发量异常的 symbol（内存 Set，进程重启时从 DB 恢复）
+const volumeSurgeToday = new Set();
+
+async function loadVolumeSurgeFromDB() {
+  try {
+    const { rows } = await pool.query(`
+      SELECT symbol FROM intraday_volume_surge
+      WHERE trade_date = current_date
+    `);
+    rows.forEach(r => volumeSurgeToday.add(r.symbol));
+    console.log(`[VolumeSurge] Loaded ${volumeSurgeToday.size} symbols from DB`);
+  } catch (e) {
+    console.error('[VolumeSurge] loadFromDB error:', e.message);
+  }
+}
+
+async function scanIntradayVolumeSurge() {
+  const SURGE_WINDOW  = Number(process.env.INTRADAY_SURGE_WINDOW  || 30);  // 分钟
+  const SURGE_RATIO   = Number(process.env.INTRADAY_SURGE_RATIO   || 3);   // 倍数
+  const SURGE_HISTORY = Number(process.env.INTRADAY_SURGE_HISTORY || 10);  // 历史天数
+
+  try {
+    const { rows } = await pool.query(`
+      WITH window_vol AS (
+        SELECT t.symbol, SUM(t.size) AS vol
+        FROM market_data.tos_trades t
+        INNER JOIN market_data.daily_summary ds
+          ON ds.symbol = t.symbol AND ds.trade_date = current_date
+        WHERE t.received_at >= NOW() - ($1 * INTERVAL '1 minute')
+        GROUP BY t.symbol
+      ),
+      hist_avg AS (
+        SELECT symbol, AVG(daily_volume) AS avg_vol
+        FROM tos_daily_volume
+        WHERE trade_date >= current_date - CAST($2 AS INTEGER)
+          AND trade_date < current_date
+        GROUP BY symbol
+        HAVING COUNT(*) >= 3
+      )
+      INSERT INTO intraday_volume_surge
+        (symbol, trade_date, bucket_time, window_vol, avg_daily_vol, vol_ratio)
+      SELECT
+        w.symbol,
+        current_date,
+        date_trunc('minute', NOW()),
+        w.vol,
+        ROUND(h.avg_vol, 2),
+        ROUND(w.vol / h.avg_vol, 2)
+      FROM window_vol w
+      JOIN hist_avg h USING (symbol)
+      WHERE w.vol / h.avg_vol >= $3
+      ON CONFLICT (symbol, trade_date) DO NOTHING
+      RETURNING symbol, vol_ratio
+    `, [SURGE_WINDOW, SURGE_HISTORY, SURGE_RATIO]);
+
+    if (rows.length > 0) {
+      rows.forEach(r => volumeSurgeToday.add(r.symbol));
+      console.log(`[VolumeSurge] ${rows.length} new surge(s): ${rows.map(r => `${r.symbol}(${r.vol_ratio}x)`).join(', ')}`);
+    }
+  } catch (e) {
+    console.error('[VolumeSurge] scan error:', e.message);
+  }
+}
+
 // [FIX 7] HillMonitor 间隔 300s
 const HILL_SCAN_INTERVAL = Number(process.env.HILL_SCAN_INTERVAL || 300000);
 
@@ -1259,6 +1342,12 @@ function startAlertMonitor() {
 
   console.log(`[HillMonitor] starting, interval=${HILL_SCAN_INTERVAL / 1000}s`);
   runScan('HillMonitor', scanAndInsertHillAlerts, HILL_SCAN_INTERVAL);
+
+  // 启动时从 DB 恢复当日已触发记录，再启动定时扫描
+  loadVolumeSurgeFromDB();
+  const SURGE_SCAN_INTERVAL = Number(process.env.INTRADAY_SURGE_INTERVAL || 300000);
+  console.log(`[VolumeSurge] starting, interval=${SURGE_SCAN_INTERVAL / 1000}s, window=${process.env.INTRADAY_SURGE_WINDOW || 30}min, ratio>=${process.env.INTRADAY_SURGE_RATIO || 3}x`);
+  runScan('VolumeSurge', scanIntradayVolumeSurge, SURGE_SCAN_INTERVAL);
 }
 
 // 静态文件服务

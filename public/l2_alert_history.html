@@ -153,6 +153,12 @@
         tr.pin-move.group-divider td { border-bottom: 2px solid rgba(255,107,53,0.4) !important; }
         tr.pin-hot.group-divider td  { border-bottom: 2px solid rgba(255,215,0,0.35)  !important; }
 
+        /* ── 分时放量：当日永久黄底，与置顶色兼容叠加 ── */
+        tr.vol-surge { background-color: rgba(255, 200, 0, 0.10) !important; }
+        tr.vol-surge:hover { background-color: rgba(255, 200, 0, 0.18) !important; }
+        tr.pin-move.vol-surge { border-left: 3px solid #ff6b35; background: rgba(255,107,53,0.10) !important; border-bottom: 1px solid rgba(255,200,0,0.25) !important; }
+        tr.pin-hot.vol-surge  { border-left: 3px solid #ffd700; background: rgba(255,215,0,0.08)  !important; border-bottom: 1px solid rgba(255,200,0,0.25) !important; }
+
         /* 新行:蓝色背景 */
         tr.is-new-batch { background: rgba(0,122,204,0.13) !important; }
         tr.is-new-batch:hover { background: rgba(0,122,204,0.22) !important; }
@@ -449,8 +455,10 @@
             <input type="number" id="filter-max-trade-vol" placeholder="最大" style="width:70px" min="0" step="1">
         </div>
         <div class="filter-group">
-            <label>涨跌额绝对值 ≥</label>
-            <input type="number" id="filter-min-abs-change" placeholder="0" style="width:60px" min="0" step="0.01" title="按绝对值筛选:填 1 表示涨跌幅度 ≥1 元(涨跌都算)">
+            <label>涨跌额绝对值区间</label>
+            <input type="number" id="filter-min-abs-change" placeholder="最小" style="width:60px" min="0" step="0.01" title="当日涨跌额绝对值最小，如 0.5">
+            <span style="color:#666">-</span>
+            <input type="number" id="filter-max-abs-change" placeholder="最大" style="width:60px" min="0" step="0.01" title="当日涨跌额绝对值最大，如 2">
         </div>
         <div class="filter-group">
             <label>屏蔽总挂单超</label>
@@ -519,6 +527,21 @@
 
     let dividerAnchorId = null;
     let dividerTime     = null;
+
+    // ── 分时放量：当日永久黄底 ──
+    const volumeSurgeSymbols = new Set();
+
+    async function refreshVolumeSurge() {
+        try {
+            const res = await fetch('/api/volume-surge-today');
+            const data = await res.json();
+            data.forEach(s => volumeSurgeSymbols.add(s)); // 只增不减，当日永久
+        } catch (e) {
+            console.warn('[VolumeSurge] fetch error:', e);
+        }
+    }
+    refreshVolumeSurge();
+    setInterval(refreshVolumeSurge, 60000);
 
     function resetDivider() {
         dividerAnchorId = null;
@@ -773,7 +796,9 @@
         const minTradeVol = parseFloat(document.getElementById('filter-min-trade-vol').value);
         const maxTradeVol = parseFloat(document.getElementById('filter-max-trade-vol').value);
         const minAbsChg   = parseFloat(document.getElementById('filter-min-abs-change').value);
-        const hasAbsChgFilter = !isNaN(minAbsChg) && minAbsChg > 0;
+        const maxAbsChg   = parseFloat(document.getElementById('filter-max-abs-change').value);
+        const hasMinAbsChg = !isNaN(minAbsChg) && minAbsChg > 0;
+        const hasMaxAbsChg = !isNaN(maxAbsChg) && maxAbsChg > 0;
 
         return data.filter(r => {
             if (blockedStocks.has(r.stock_code)) return false;
@@ -803,10 +828,12 @@
             if (!isNaN(minTradeVol) && tradeVol < minTradeVol) return false;
             if (!isNaN(maxTradeVol) && tradeVol > maxTradeVol) return false;
 
-            // 涨跌额按绝对值筛选:0 或空时不生效
-            if (hasAbsChgFilter) {
+            // 涨跌额按绝对值区间筛选
+            if (hasMinAbsChg || hasMaxAbsChg) {
                 if (r.day_change_amt == null) return false;
-                if (Math.abs(Number(r.day_change_amt)) < minAbsChg) return false;
+                const absAmt = Math.abs(Number(r.day_change_amt));
+                if (hasMinAbsChg && absAmt < minAbsChg) return false;
+                if (hasMaxAbsChg && absAmt > maxAbsChg) return false;
             }
 
             return true;
@@ -825,10 +852,19 @@
         });
     }
 
-    function fmtVol(v) {
+    function fmtVol(v, type = null) {
         v = Number(v);
         if (isNaN(v)) return '—';
-        return v >= 1000 ? v.toLocaleString() : String(v);
+        let str = v >= 1000 ? v.toLocaleString() : String(v);
+        if (v > 5000) {
+            str = `<strong>${str}</strong>`;
+        }
+        if (type === 'bid') {
+            str = `<span class="up">${str}</span>`;
+        } else if (type === 'ask') {
+            str = `<span class="down">${str}</span>`;
+        }
+        return str;
     }
     function fmtPrice(v) {
         v = Number(v);
@@ -903,17 +939,17 @@
             rowCls = flashIds[row.id] === 'chg' ? 'flash-chg'
                    : flashIds[row.id] === 'new' ? 'flash-new' : '';
         }
-        if (newRowIds.has(row.id)) rowCls += ' is-new-batch';
-        if (isGroupDivider) rowCls += ' group-divider';
-        if (isDividerRow)   rowCls += ' refresh-divider';
+        if (newRowIds.has(row.id))                      rowCls += ' is-new-batch';
+        if (volumeSurgeSymbols.has(row.stock_code))     rowCls += ' vol-surge';
+        if (isGroupDivider)                             rowCls += ' group-divider';
+        if (isDividerRow)                               rowCls += ' refresh-divider';
 
         return `<tr class="${rowCls.trim()}" data-code="${row.stock_code}">
             <td>${i}</td>
             <td><div class="symbol-cell"><span class="symbol">${mark}${row.stock_code}</span><button class="btn-block-inline" onclick="blockStock('${row.stock_code}');renderBlockList()" title="屏蔽此股票">×</button></div></td>
-            <td>${sideEl}</td>
+            <td>${fmtVol(row.volume, row.alert_type)}</td>
             <td><span class="level-badge">L${row.level}</span></td>
             <td>${fmtPrice(row.price)}</td>
-            <td>${fmtVol(row.volume)}</td>
             <td>${fmtVol(row.total_volume)}</td>
             <td>${ratioEl}</td>
             <td style="text-align:right">${fmtDayChange(row)}</td>
@@ -965,10 +1001,9 @@
             <thead><tr>
                 <th>#</th>
                 <th onclick="handleSort('stock_code')"     class="${thCls('stock_code')}">代码 ${thIcon('stock_code')}</th>
-                <th onclick="handleSort('alert_type')"     class="${thCls('alert_type')}">方向 ${thIcon('alert_type')}</th>
+                <th onclick="handleSort('volume')"         class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
                 <th onclick="handleSort('level')"          class="${thCls('level')}">档位 ${thIcon('level')}</th>
                 <th onclick="handleSort('price')"          class="${thCls('price')}">挂单价 ${thIcon('price')}</th>
-                <th onclick="handleSort('volume')"         class="${thCls('volume')}">挂单量 ${thIcon('volume')}</th>
                 <th onclick="handleSort('total_volume')"   class="${thCls('total_volume')}">交易量 ${thIcon('total_volume')}</th>
                 <th onclick="handleSort('price_ratio')"    class="${thCls('price_ratio')}">倍数 ${thIcon('price_ratio')}</th>
                 <th onclick="handleSort('day_change_amt')" class="${thCls('day_change_amt')}">日涨跌 ${thIcon('day_change_amt')}</th>
@@ -1037,12 +1072,12 @@
         renderTable();
     }
 
-    [
+        [
         'filter-side', 'filter-trend', 'filter-symbol', 'filter-ratio',
         'filter-min-price', 'filter-max-price',
         'filter-min-volume', 'filter-max-volume',
         'filter-min-trade-vol', 'filter-max-trade-vol',
-        'filter-min-abs-change',
+        'filter-min-abs-change', 'filter-max-abs-change',
         'filter-max-book-vol'
     ].forEach(id => {
         document.getElementById(id).addEventListener('input',  () => { renderTable(); renderStats(); });
