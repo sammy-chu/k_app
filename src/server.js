@@ -1032,9 +1032,21 @@ async function ensureVolumeAlertSchema() {
   volumeSchemaReady = true;
 }
 
-// [FIX 6] updateDailySummary 增量模式
+// [FIX 6] updateDailySummary 全天汇总模式
 // [FIX H] open_price 使用 CASE 保护，一旦写入不再覆盖
+// [FIX I] 过滤 trade_time 晚于 received_at 当天时刻的补推历史单
+// [FIX J] 去掉 2 分钟窗口改为全天汇总，close/high/low/volume 直接覆盖，避免重复累加
+// [FIX K] 开市前（北京时间 08:00 前）直接跳过，防止补推历史单污染 open_price
+// [FIX L] open_price 自纠错：若已写入值与新算出值偏差 > 20%，允许覆盖（应对极少数脏数据锁定场景）
 async function updateDailySummary() {
+  // [FIX K] 非交易时段不写入，避免凌晨补推数据锁定错误 open_price
+  const nowBeijing = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
+  const beijingMins = nowBeijing.getHours() * 60 + nowBeijing.getMinutes();
+  if (beijingMins < 8 * 60) {
+    // 08:00 前静默跳过，无需打日志
+    return;
+  }
+
   const client = await pool.connect();
   try {
     await client.query('SET statement_timeout = 15000');
@@ -1050,17 +1062,27 @@ async function updateDailySummary() {
         MIN(price::numeric)  AS low_price,
         SUM(size::numeric)   AS total_volume
       FROM tos_trades
-      WHERE received_at >= NOW() - INTERVAL '2 minutes'
-        AND received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
+      WHERE received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
         AND price IS NOT NULL AND price::numeric > 0
         AND market_time IS NOT NULL AND market_time != ''
+        AND trim(trade_time)::time <= (received_at AT TIME ZONE 'Asia/Shanghai')::time + interval '1 second'
       GROUP BY symbol, (received_at AT TIME ZONE 'Asia/Shanghai')::date
       ON CONFLICT (symbol, trade_date) DO UPDATE SET
-        open_price   = CASE WHEN daily_summary.open_price IS NULL THEN EXCLUDED.open_price ELSE daily_summary.open_price END,
+        -- [FIX L] 正常情况保留已写入的 open_price 不覆盖；
+        --         但若偏差超过 20%，说明之前锁定的是脏数据，允许纠正。
+        open_price   = CASE
+                         WHEN daily_summary.open_price IS NULL
+                           THEN EXCLUDED.open_price
+                         WHEN daily_summary.open_price > 0
+                           AND ABS(daily_summary.open_price - EXCLUDED.open_price)
+                               / daily_summary.open_price > 0.20
+                           THEN EXCLUDED.open_price
+                         ELSE daily_summary.open_price
+                       END,
         close_price  = EXCLUDED.close_price,
-        high_price   = GREATEST(daily_summary.high_price, EXCLUDED.high_price),
-        low_price    = LEAST(daily_summary.low_price, EXCLUDED.low_price),
-        total_volume = daily_summary.total_volume + EXCLUDED.total_volume
+        high_price   = EXCLUDED.high_price,
+        low_price    = EXCLUDED.low_price,
+        total_volume = EXCLUDED.total_volume
     `;
     await client.query(sql);
   } catch (err) {
