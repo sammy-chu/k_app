@@ -5,12 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>股票涨跌幅排名</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background-color: #1a1a1a;
@@ -18,707 +13,564 @@
             padding: 20px;
             line-height: 1.6;
         }
-
-        .container {
-            max-width: 1600px;
-            margin: 0 auto;
-        }
-
-        .nav-links {
-            text-align: center;
-            margin-bottom: 30px;
-        }
-
+        .container { max-width: 1600px; margin: 0 auto; }
+        .nav-links { text-align: center; margin-bottom: 30px; }
         .nav-links a {
-            color: #007acc;
-            text-decoration: none;
-            padding: 8px 16px;
-            margin: 0 10px;
-            border: 1px solid #007acc;
-            border-radius: 4px;
-            transition: all 0.2s;
-            display: inline-block;
+            color: #007acc; text-decoration: none; padding: 8px 16px; margin: 0 10px;
+            border: 1px solid #007acc; border-radius: 4px; transition: all 0.2s; display: inline-block;
         }
-
-        .nav-links a:hover {
-            background-color: #007acc;
-            color: white;
-        }
-
+        .nav-links a:hover { background-color: #007acc; color: white; }
         .header-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #333;
-            padding-bottom: 15px;
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 15px;
         }
-
-        .title {
-            font-size: 1.5em;
-            color: #ddd;
-            font-weight: normal;
-        }
-
-        .controls {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-        }
-
-        .sort-btn {
-            background-color: #2a2a2a;
-            border: 1px solid #444;
-            color: #ddd;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-
-        .sort-btn:hover {
-            background-color: #333;
-        }
-
-        .sort-btn.active {
-            background-color: #007acc;
-            border-color: #007acc;
-            color: white;
-        }
-
-        .refresh-info {
-            font-size: 12px;
-            color: #888;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            background-color: #252525;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
-        th, td {
-            padding: 12px 15px;
-            text-align: right;
-            border-bottom: 1px solid #333;
-        }
-
-        th {
-            background-color: #333;
-            color: #ccc;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-        }
-
-        th:first-child, td:first-child {
-            text-align: center;
-        }
-
-        th:nth-child(2), td:nth-child(2) {
-            text-align: left;
-        }
-
-        tr:hover {
-            background-color: #2a2a2a;
-        }
-
-        .up { color: #26a69a; }
+        .title { font-size: 1.5em; color: #ddd; font-weight: normal; }
+        .controls { display: flex; gap: 15px; align-items: center; }
+        .refresh-info { font-size: 12px; color: #888; white-space: nowrap; }
+        table { width: 100%; border-collapse: collapse; background-color: #252525; border-radius: 8px; overflow: hidden; }
+        th, td { padding: 12px 15px; text-align: right; border-bottom: 1px solid #333; }
+        th { background-color: #333; color: #ccc; font-weight: 600; font-size: 14px; cursor: pointer; }
+        th:first-child, td:first-child { text-align: center; }
+        th:nth-child(2), td:nth-child(2) { text-align: left; }
+        tr:hover { background-color: #2a2a2a; }
+        .up   { color: #26a69a; }
         .down { color: #ef5350; }
         .flat { color: #888; }
-
-        .symbol {
-            font-weight: bold;
-            color: #fff;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 40px;
-            color: #888;
-        }
-
-        .error {
-            text-align: center;
-            padding: 40px;
-            color: #ff6b6b;
-        }
-
-
+        .symbol { font-weight: bold; color: #fff; }
+        .loading { text-align: center; padding: 40px; color: #888; }
+        .error   { text-align: center; padding: 40px; color: #ff6b6b; }
 
         .filters {
-            display: flex;
-            gap: 15px;
-            align-items: center;
-            background-color: #2a2a2a;
-            padding: 10px;
-            border-radius: 4px;
-            margin-right: 15px;
+            display: flex; gap: 12px; align-items: center;
+            background-color: #2a2a2a; padding: 10px; border-radius: 4px;
+            margin-right: 15px; flex-wrap: wrap;
         }
-
-        .filter-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
+        .filter-item { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #aaa; }
         .filter-input {
-            background-color: #1a1a1a;
-            border: 1px solid #444;
-            color: #ddd;
-            padding: 4px 8px;
-            border-radius: 4px;
-            width: 80px;
+            background-color: #1a1a1a; border: 1px solid #444; color: #ddd;
+            padding: 4px 8px; border-radius: 4px; width: 68px; font-size: 13px;
         }
 
-        .warning-up {
-            background-color: rgba(38, 166, 154, 0.2) !important;
-        }
+        /* ── 波动筛选器置顶：紫色背景 ── */
+        tr.swing-pinned { background-color: rgba(147, 51, 234, 0.18) !important; }
+        tr.swing-pinned:hover { background-color: rgba(147, 51, 234, 0.28) !important; }
 
-        .warning-down {
-            background-color: rgba(239, 83, 80, 0.2) !important;
+        /* ── 预警闪烁：涨绿跌红，用 CSS animation 控制 ── */
+        @keyframes warningUp {
+            0%, 100% { background-color: rgba(38,166,154,0.07); }
+            50%       { background-color: rgba(38,166,154,0.30); }
         }
-
-        .dual-panel {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
+        @keyframes warningDown {
+            0%, 100% { background-color: rgba(239,83,80,0.07); }
+            50%       { background-color: rgba(239,83,80,0.30); }
         }
+        tr.warning-up   { animation: warningUp   1.2s ease-in-out infinite !important; }
+        tr.warning-down { animation: warningDown  1.2s ease-in-out infinite !important; }
+        /* ── 分时放量：当日永久黄底 ── */
+        tr.vol-surge { background-color: rgba(255, 200, 0, 0.13) !important; }
+        /* 撞色时 animation 帧值覆盖黄底，动画结束后黄底自动恢复 */
+        tr.vol-surge.warning-up   { animation: warningUp   1.2s ease-in-out infinite !important; }
+        tr.vol-surge.warning-down { animation: warningDown  1.2s ease-in-out infinite !important; }
 
-        .dual-panel th,
-        .dual-panel td {
-            padding: 8px 8px;
-            font-size: 13px;
-        }
-
-        .panel {
-            background-color: #252525;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-
+        .dual-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .dual-panel th, .dual-panel td { padding: 8px 8px; font-size: 13px; }
+        .panel { background-color: #252525; border-radius: 8px; overflow: hidden; }
         .panel-title {
-            padding: 10px 15px;
-            font-size: 14px;
-            font-weight: 600;
-            background-color: #2a2a2a;
-            border-bottom: 1px solid #333;
+            padding: 10px 15px; font-size: 14px; font-weight: 600;
+            background-color: #2a2a2a; border-bottom: 1px solid #333;
         }
-
         @media (max-width: 768px) {
-            .dual-panel {
-                grid-template-columns: 1fr;
-            }
-
-            .header-bar {
-                flex-direction: column;
-                align-items: flex-start;
-                gap: 10px;
-            }
-
-            .controls {
-                width: 100%;
-                flex-wrap: wrap;
-            }
-
-            .filters {
-                flex-wrap: wrap;
-                margin-right: 0;
-            }
+            .dual-panel { grid-template-columns: 1fr; }
+            .header-bar { flex-direction: column; align-items: flex-start; gap: 10px; }
+            .controls { width: 100%; flex-wrap: wrap; }
+            .filters { flex-wrap: wrap; margin-right: 0; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="nav-links">
-            <a href="/alerts">价格提醒</a>
-            <a href="/volume-alerts">放量提醒</a>
-            <a href="/hills">山丘形态</a>
-            <a href="/hill-alerts">山丘放量</a>
-            <a href="/ranking">涨跌排名</a>
-            <a href="/l2-alerts">L2大单</a>
-        </div>
+<div class="container">
+    <div class="nav-links">
+        <a href="/alerts">价格提醒</a>
+        <a href="/volume-alerts">放量提醒</a>
+        <a href="/hills">山丘形态</a>
+        <a href="/hill-alerts">山丘放量</a>
+        <a href="/ranking">涨跌排名</a>
+        <a href="/l2-alerts">L2大单</a>
+    </div>
 
-        <div class="header-bar">
-            <h1 class="title">今日涨跌排名</h1>
-            <div class="controls">
-                <div class="filters">
-                    <div class="filter-item">
-                        <label>最小成交量:</label>
-                        <input type="number" id="min-volume" class="filter-input" value="0" oninput="debounceFetch()">
-                    </div>
-                    <div class="filter-item">
-                        <label>2分钟波动:</label>
-                        <input type="number" id="min-2m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()">
-                    </div>
-                    <div class="filter-item">
-                        <label>价格区间:</label>
-                        <input type="number" id="min-price" class="filter-input" value="0" step="0.01" placeholder="最低" oninput="renderTable()">
-                        <span style="color:#666">~</span>
-                        <input type="number" id="max-price" class="filter-input" value="" step="0.01" placeholder="最高" oninput="renderTable()">
-                    </div>
-                    <div class="filter-item">
-                        <label>
-                            <input type="checkbox" id="filter-5pct" onchange="renderTable()"> 涨跌超5%
-                        </label>
-                    </div>
+    <div class="header-bar">
+        <h1 class="title">今日涨跌排名</h1>
+        <div class="controls">
+            <div class="filters">
+                <div class="filter-item">
+                    <label>最小成交量</label>
+                    <input type="number" id="min-volume" class="filter-input" value="0" oninput="debounceFetch()">
                 </div>
-                <span class="refresh-info" id="refresh-timer">3s</span>
+                <div class="filter-item">
+                    <label>2分钟波动</label>
+                    <input type="number" id="min-2m-change" class="filter-input" value="0" step="0.01" oninput="debounceFetch()">
+                </div>
+                <div class="filter-item">
+                    <label>价格区间</label>
+                    <input type="number" id="min-price" class="filter-input" value="0" step="0.01" placeholder="最低" oninput="renderTable()">
+                    <span style="color:#555">~</span>
+                    <input type="number" id="max-price" class="filter-input" value="" step="0.01" placeholder="最高" oninput="renderTable()">
+                </div>
+                <!-- ── 新增：涨跌金额筛选（绝对值） ── -->
+                <div class="filter-item">
+                    <label>涨跌金额</label>
+                    <input type="number" id="min-change-amt" class="filter-input" value="" step="0.01"
+                           placeholder="最小" title="涨跌额绝对值 ≥ 此值，如 0.5" oninput="renderTable()">
+                    <span style="color:#555">~</span>
+                    <input type="number" id="max-change-amt" class="filter-input" value="" step="0.01"
+                           placeholder="最大" title="涨跌额绝对值 ≤ 此值，如 5" oninput="renderTable()">
+                </div>
+                <div class="filter-item">
+                    <label>
+                        <input type="checkbox" id="filter-5pct" onchange="renderTable()"> 涨跌超5%
+                    </label>
+                </div>
+                <div class="filter-item">
+                    <button id="clear-pin-btn" onclick="clearAllPins()"
+                        title="取消所有因涨跌超5%而置顶的股票"
+                        style="background:#2a2a2a;border:1px solid #555;color:#ccc;padding:4px 10px;
+                               border-radius:4px;font-size:13px;cursor:pointer;white-space:nowrap;
+                               transition:all 0.2s;">
+                        📌 取消置顶
+                    </button>
+                </div>
             </div>
-        </div>
-
-        <div id="content">
-            <div class="loading" id="empty-message">正在加载数据...</div>
+            <span class="refresh-info" id="refresh-timer">3s 后刷新</span>
         </div>
     </div>
 
-    <script>
-        let currentData = [];
-        let symbolStates = {};
-        let countdown = 3;
-        let debounceTimer = null;
+    <div id="content">
+        <div class="loading" id="empty-message">正在加载数据...</div>
+    </div>
+</div>
 
-        // 双列各自的排序状态
-        let dualSort = {
-            up:   { col: 'change_pct', dir: 'desc' },
-            down: { col: 'change_pct', dir: 'desc' }
+<script>
+    let currentData   = [];
+    let symbolStates  = {};
+    let countdown     = 3;
+    let debounceTimer = null;
+
+    // ── 分时放量：当日永久黄底 ──
+    const volumeSurgeSymbols = new Set();
+
+    // ── 波动筛选器命中：置顶2分钟，紫色背景 ──
+    // Map: symbol -> pinnedAt (timestamp ms)
+    const swingPinnedSymbols = new Map();
+    const SWING_PIN_MS = 2 * 60 * 1000; // 2分钟
+
+    async function refreshSwingScreener() {
+        try {
+            const res = await fetch('/api/price-swing-screener');
+            if (!res.ok) return;
+            const data = await res.json();
+            const now = Date.now();
+            data.forEach(item => {
+                if (!swingPinnedSymbols.has(item.symbol)) {
+                    swingPinnedSymbols.set(item.symbol, now);
+                }
+            });
+            // 清理超过2分钟的
+            for (const [sym, t] of swingPinnedSymbols) {
+                if (now - t > SWING_PIN_MS) swingPinnedSymbols.delete(sym);
+            }
+        } catch (e) {
+            console.warn('[SwingScreener] fetch error:', e);
+        }
+    }
+    refreshSwingScreener();
+    setInterval(refreshSwingScreener, 10000);
+
+    async function refreshVolumeSurge() {
+        try {
+            const res = await fetch("/api/volume-surge-today");
+            const data = await res.json();
+            data.forEach(s => volumeSurgeSymbols.add(s)); // 只增不减，当日永久
+        } catch (e) {
+            console.warn("[VolumeSurge] fetch error:", e);
+        }
+    }
+    refreshVolumeSurge();
+    setInterval(refreshVolumeSurge, 60000);
+
+    let dualSort = {
+        up:   { col: 'change_pct', dir: 'desc' },
+        down: { col: 'change_pct', dir: 'desc' }
+    };
+
+    // ── 置顶 Map ──
+    const pinnedUpSymbols   = new Map();
+    const pinnedDownSymbols = new Map();
+    const PIN_KEEP_MS = 10 * 60 * 1000;
+
+    // ── 手动取消置顶集合（刷新后也不再自动置顶）──
+    const manuallyUnpinned = new Set(JSON.parse(sessionStorage.getItem('manuallyUnpinned') || '[]'));
+
+    JSON.parse(sessionStorage.getItem('pinnedUp')   || '[]').forEach(([s, t]) => pinnedUpSymbols.set(s, t));
+    JSON.parse(sessionStorage.getItem('pinnedDown') || '[]').forEach(([s, t]) => pinnedDownSymbols.set(s, t));
+
+    function updatePinned(data) {
+        const now = Date.now();
+        data.forEach(item => {
+            if (manuallyUnpinned.has(item.symbol)) return; // 已手动取消，跳过自动置顶
+            const pct = Number(item.change_pct);
+            if (pct >= 5  && !pinnedUpSymbols.has(item.symbol))   pinnedUpSymbols.set(item.symbol, now);
+            if (pct <= -5 && !pinnedDownSymbols.has(item.symbol)) pinnedDownSymbols.set(item.symbol, now);
+        });
+        sessionStorage.setItem('pinnedUp',   JSON.stringify([...pinnedUpSymbols]));
+        sessionStorage.setItem('pinnedDown', JSON.stringify([...pinnedDownSymbols]));
+    }
+
+    function isPinnedActive(item, side) {
+        const map = side === 'up' ? pinnedUpSymbols : pinnedDownSymbols;
+        if (!map.has(item.symbol)) return false;
+        if (Math.abs(Number(item.change_amount)) >= 0.5) return true;
+        return Date.now() - map.get(item.symbol) < PIN_KEEP_MS;
+    }
+
+    function getPinnedMark(item, side) {
+        const map = side === 'up' ? pinnedUpSymbols : pinnedDownSymbols;
+        if (!map.has(item.symbol)) return '';
+        if (Math.abs(Number(item.change_amount)) >= 0.5) return ' 📌';
+        const remainMs = PIN_KEEP_MS - (Date.now() - map.get(item.symbol));
+        if (remainMs <= 0) return '';
+        return ` ⏱${Math.ceil(remainMs / 60000)}m`;
+    }
+
+    // ── 预警方向：返回 'up' | 'down' | null ──
+    function getWarningDirection(item) {
+        const s = symbolStates[item.symbol];
+        if (!s?.warning?.active) return null;
+        // 确认当前1分钟内仍有 ≥0.5 的运动
+        const c = get1mChange(item.symbol, Number(item.last_price));
+        if (c === null || Math.abs(c) < 0.5) return null;
+        return s.warning.direction; // 'up' | 'down'
+    }
+
+    function debounceFetch() {
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => fetchData(), 500);
+    }
+
+    function get2mChange(symbol, currentPrice) {
+        const state = symbolStates[symbol];
+        if (!state || state.history.length === 0) return null;
+        const old = state.history.find(h => h.t >= Date.now() - 120000) || state.history[0];
+        return currentPrice - old.p;
+    }
+
+    function get1mChange(symbol, currentPrice) {
+        const state = symbolStates[symbol];
+        if (!state || state.history.length === 0) return null;
+        const old = state.history.find(h => h.t >= Date.now() - 60000) || state.history[0];
+        return currentPrice - old.p;
+    }
+
+    function handleDualSort(side, col) {
+        const cur = dualSort[side];
+        cur.dir = (cur.col === col && cur.dir === 'desc') ? 'asc' : 'desc';
+        cur.col = col;
+        renderTable();
+    }
+
+    let isFetching = false;
+
+    function processWarnings(data) {
+        const now = Date.now();
+        data.forEach(item => {
+            const currentPrice = Number(item.last_price);
+            if (isNaN(currentPrice)) return;
+
+            let state = symbolStates[item.symbol];
+            if (!state) {
+                state = { history: [], warning: { active: false } };
+                symbolStates[item.symbol] = state;
+            }
+
+            state.history.push({ t: now, p: currentPrice });
+            while (state.history.length > 0 && now - state.history[0].t > 120000) state.history.shift();
+
+            if (state.history.length === 0) return;
+
+            const nowMs    = Date.now();
+            const ref1m    = state.history.find(h => h.t >= nowMs - 60000)  || state.history[0];
+            const change1m = currentPrice - ref1m.p;
+            const abs1m    = Math.abs(change1m);
+            const ref2m    = state.history.find(h => h.t >= nowMs - 120000) || state.history[0];
+            const change2m = currentPrice - ref2m.p;
+            const abs2m    = Math.abs(change2m);
+
+            const triggered = abs1m > 0.5 || abs2m > 0.8;
+            // 方向跟踪：优先1分钟，实时更新
+            const direction = change1m !== 0
+                ? (change1m > 0 ? 'up' : 'down')
+                : (change2m > 0 ? 'up' : 'down');
+            const absChange = Math.max(abs1m, abs2m);
+
+            if (state.warning.active) {
+                if (nowMs > state.warning.endTime) {
+                    state.warning = triggered
+                        ? { active: true, startTime: nowMs, endTime: nowMs + 5 * 60 * 1000, maxChange: absChange, direction }
+                        : { active: false };
+                } else {
+                    if (absChange > state.warning.maxChange) {
+                        state.warning.maxChange = absChange;
+                        state.warning.endTime   = Math.min(nowMs + 5 * 60 * 1000, state.warning.startTime + 30 * 60 * 1000);
+                        state.warning.direction = direction; // 实时跟踪最新方向
+                    }
+                }
+            } else {
+                if (triggered) {
+                    state.warning = { active: true, startTime: nowMs, endTime: nowMs + 5 * 60 * 1000, maxChange: absChange, direction };
+                }
+            }
+        });
+    }
+
+    async function fetchData() {
+        if (isFetching) return;
+        isFetching = true;
+        try {
+            const minVol = document.getElementById('min-volume').value;
+            const res = await fetch(`/api/ranking?min_volume=${minVol}`);
+            if (!res.ok) throw new Error('Network response was not ok');
+            currentData = await res.json();
+            processWarnings(currentData);
+            updatePinned(currentData);
+            renderTable();
+            resetTimer();
+        } catch (err) {
+            console.error('Fetch error:', err);
+            if (!currentData || currentData.length === 0) {
+                document.getElementById('content').innerHTML = `<div class="error">加载失败: ${err.message}</div>`;
+            }
+        } finally {
+            isFetching = false;
+        }
+    }
+
+    function formatNumber(num, decimals = 2) {
+        if (num === null || num === undefined) return '-';
+        return Number(num).toFixed(decimals);
+    }
+    function formatVolume(num) {
+        if (num === null || num === undefined) return '-';
+        if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
+        if (num >= 1000)    return (num / 1000).toFixed(1) + 'K';
+        return num;
+    }
+
+    function renderTable() {
+        if (!currentData || currentData.length === 0) {
+            let msg = document.getElementById('empty-message');
+            if (!msg) { msg = document.createElement('div'); msg.id = 'empty-message'; msg.className = 'loading'; document.getElementById('content').appendChild(msg); }
+            msg.style.display = 'block';
+            msg.textContent = '暂无数据';
+            return;
+        }
+
+        // ── 读取所有筛选条件 ──
+        const minPrice    = parseFloat(document.getElementById('min-price').value)     || 0;
+        const maxPrice    = parseFloat(document.getElementById('max-price').value)     || Infinity;
+        const min2mChange = parseFloat(document.getElementById('min-2m-change').value) || 0;
+        const filter5Pct  = document.getElementById('filter-5pct').checked;
+        const minChgAmt   = parseFloat(document.getElementById('min-change-amt').value);
+        const maxChgAmt   = parseFloat(document.getElementById('max-change-amt').value);
+
+        const filteredData = currentData.filter(item => {
+            const p      = Number(item.last_price);
+            const pct    = Math.abs(Number(item.change_pct));
+            const chgAmt = Math.abs(Number(item.change_amount));
+
+            if (p < minPrice || p > maxPrice) return false;
+            if (filter5Pct && pct <= 5) return false;
+            if (min2mChange > 0) {
+                const c2m = get2mChange(item.symbol, Number(item.last_price));
+                if (c2m === null || Math.abs(c2m) < min2mChange) return false;
+            }
+            // 涨跌金额绝对值筛选
+            if (!isNaN(minChgAmt) && chgAmt < minChgAmt) return false;
+            if (!isNaN(maxChgAmt) && chgAmt > maxChgAmt) return false;
+
+            return true;
+        });
+
+        if (filteredData.length === 0) {
+            const sk = document.getElementById('ranking-skeleton');
+            if (sk) sk.style.display = 'none';
+            let msg = document.getElementById('empty-message');
+            if (!msg) { msg = document.createElement('div'); msg.id = 'empty-message'; msg.className = 'loading'; document.getElementById('content').appendChild(msg); }
+            msg.style.display = 'block';
+            msg.textContent = '暂无符合条件的数据';
+            return;
+        } else {
+            const msg = document.getElementById('empty-message');
+            if (msg) msg.style.display = 'none';
+            const sk = document.getElementById('ranking-skeleton');
+            if (sk) sk.style.display = 'grid';
+        }
+
+        const sorted     = [...filteredData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
+        const pinnedUp   = sorted.filter(x => isPinnedActive(x, 'up'));
+        const normalUp   = sorted.filter(x => !isPinnedActive(x, 'up')   && Number(x.change_pct) >= 0);
+        const pinnedDown = sorted.filter(x => isPinnedActive(x, 'down'));
+        const normalDown = sorted.filter(x => !isPinnedActive(x, 'down') && Number(x.change_pct) <= -0.001);
+
+        // 初始化骨架
+        if (!document.getElementById('ranking-skeleton')) {
+            document.getElementById('content').innerHTML = `
+                <div class="dual-panel" id="ranking-skeleton">
+                    <div class="panel panel-up">
+                        <div class="panel-title up">▲ 涨幅榜</div>
+                        <table><thead id="thead-up"></thead><tbody id="tbody-up"></tbody></table>
+                    </div>
+                    <div class="panel panel-down">
+                        <div class="panel-title down">▼ 跌幅榜</div>
+                        <table><thead id="thead-down"></thead><tbody id="tbody-down"></tbody></table>
+                    </div>
+                </div>`;
+        }
+
+        const updateSide = (rawList, side) => {
+            const { col, dir } = dualSort[side];
+            const swingPinned = rawList.filter(x => swingPinnedSymbols.has(x.symbol) && (Date.now() - swingPinnedSymbols.get(x.symbol) <= SWING_PIN_MS));
+            const pinned = rawList.filter(x => isPinnedActive(x, side) && !swingPinnedSymbols.has(x.symbol));
+            const normal = rawList.filter(x => !isPinnedActive(x, side) && !swingPinnedSymbols.has(x.symbol) && (
+                side === 'up' ? Number(x.change_pct) > -0.001 : Number(x.change_pct) <= -0.001
+            ));
+            const sortFn = (a, b) => {
+                const valA = col === '2m' ? (get2mChange(a.symbol, Number(a.last_price)) ?? -Infinity) : Number(a[col]);
+                const valB = col === '2m' ? (get2mChange(b.symbol, Number(b.last_price)) ?? -Infinity) : Number(b[col]);
+                return dir === 'desc' ? valB - valA : valA - valB;
+            };
+            const sortedList = [...swingPinned.sort(sortFn), ...pinned.sort(sortFn), ...normal.sort(sortFn)].slice(0, 250);
+
+            const icon  = c => dualSort[side].col !== c ? '<span style="color:#555">↕</span>' : (dualSort[side].dir === 'asc' ? '↑' : '↓');
+            const thCls = c => dualSort[side].col === c ? 'style="color:#007acc;cursor:pointer"' : 'style="cursor:pointer"';
+
+            document.getElementById(`thead-${side}`).innerHTML = `<tr>
+                <th style="text-align:center">#</th>
+                <th style="text-align:left">代码</th>
+                <th onclick="handleDualSort('${side}','last_price')"    ${thCls('last_price')}>最新价 ${icon('last_price')}</th>
+                <th onclick="handleDualSort('${side}','open_price')"    ${thCls('open_price')}>开盘价 ${icon('open_price')}</th>
+                <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th>
+                <th onclick="handleDualSort('${side}','change_pct')"    ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th>
+                <th onclick="handleDualSort('${side}','total_volume')"  ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th>
+                <th onclick="handleDualSort('${side}','2m')"            ${thCls('2m')}>2分涨跌 ${icon('2m')}</th>
+            </tr>`;
+
+            const tbody = document.getElementById(`tbody-${side}`);
+            let ci = 0;
+
+            sortedList.forEach((item, i) => {
+                const rowId = `row-${side}-${item.symbol.replace(/[^a-zA-Z0-9]/g, '-')}`;
+                let tr = document.getElementById(rowId);
+                if (!tr) {
+                    tr = document.createElement('tr');
+                    tr.id = rowId;
+                    tbody.insertBefore(tr, tbody.children[ci] || null);
+                } else if (tbody.children[ci] !== tr) {
+                    tbody.insertBefore(tr, tbody.children[ci] || null);
+                }
+                ci++;
+
+                const changeClass  = Number(item.change_pct) >= 0 ? 'up' : 'down';
+                const isPinned     = isPinnedActive(item, side);
+                const pinnedMark   = getPinnedMark(item, side);
+                const borderColor  = side === 'up' ? '#26a69a' : '#ef5350';
+                const leftBorder   = isPinned ? `3px solid ${borderColor}` : '';
+                if (tr.style.borderLeft !== leftBorder) tr.style.borderLeft = leftBorder;
+
+                // ── 波动筛选器命中：紫色背景 ──
+                const isSwingPinned = swingPinnedSymbols.has(item.symbol) && (Date.now() - swingPinnedSymbols.get(item.symbol) <= SWING_PIN_MS);
+                if (isSwingPinned) {
+                    tr.classList.add('swing-pinned');
+                } else {
+                    tr.classList.remove('swing-pinned');
+                }
+
+                // ── 闪烁：按预警方向应用对应 class ──
+                const warnDir = getWarningDirection(item);
+                tr.classList.remove('warning-up', 'warning-down');
+                if (warnDir === 'up')   tr.classList.add('warning-up');
+                if (warnDir === 'down') tr.classList.add('warning-down');
+
+                // ── 分时放量：永久黄底 ──
+                if (volumeSurgeSymbols.has(item.symbol)) {
+                    tr.classList.add("vol-surge");
+                } else {
+                    tr.classList.remove("vol-surge");
+                }
+
+                const c2m    = get2mChange(item.symbol, Number(item.last_price));
+                const c2mCls = c2m > 0 ? 'up' : c2m < 0 ? 'down' : 'flat';
+                const c2mStr = c2m !== null
+                    ? `<span class="${c2mCls}">${c2m > 0 ? '+' : ''}${c2m.toFixed(2)}</span>`
+                    : '-';
+
+                const swingRemainSec = swingPinnedSymbols.has(item.symbol)
+                    ? Math.max(0, Math.ceil((SWING_PIN_MS - (Date.now() - swingPinnedSymbols.get(item.symbol))) / 1000))
+                    : 0;
+                const swingMark = swingRemainSec > 0 ? ` <span style="color:#a855f7;font-size:10px;">⬡${swingRemainSec}s</span>` : '';
+
+                const newHtml = `
+                    <td style="text-align:center;color:#666">${i + 1}${pinnedMark}${swingMark}</td>
+                    <td class="symbol">${item.symbol}</td>
+                    <td class="${changeClass}">${formatNumber(item.last_price)}</td>
+                    <td>${formatNumber(item.open_price)}</td>
+                    <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
+                    <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
+                    <td>${formatVolume(item.total_volume)}</td>
+                    <td>${c2mStr}</td>`;
+
+                if (tr._lastHtml !== newHtml) { tr.innerHTML = newHtml; tr._lastHtml = newHtml; }
+            });
+
+            while (tbody.children.length > sortedList.length) tbody.removeChild(tbody.lastChild);
         };
 
-        // ── 置顶 Map：symbol -> firstPinnedTime ──────────────────────────
-        // 改为 Map 存首次触发5%的时间戳，支持10分钟临时置顶逻辑
-        const pinnedUpSymbols   = new Map();
-        const pinnedDownSymbols = new Map();
-        const PIN_KEEP_MS = 10 * 60 * 1000; // 10分钟
+        updateSide([...pinnedUp, ...normalUp],     'up');
+        updateSide([...pinnedDown, ...normalDown], 'down');
+    }
 
-        // 页面初始化时从 sessionStorage 恢复（存储格式为 [[symbol, time], ...]）
-        JSON.parse(sessionStorage.getItem('pinnedUp')   || '[]').forEach(([s, t]) => pinnedUpSymbols.set(s, t));
-        JSON.parse(sessionStorage.getItem('pinnedDown') || '[]').forEach(([s, t]) => pinnedDownSymbols.set(s, t));
+    let pinsCleared = false; // 当前是否处于"已取消置顶"状态
 
-        // 只在首次触发5%时记录时间，不覆盖
-        function updatePinned(data) {
-            const now = Date.now();
-            data.forEach(item => {
-                const pct = Number(item.change_pct);
-                if (pct >= 5  && !pinnedUpSymbols.has(item.symbol))   pinnedUpSymbols.set(item.symbol, now);
-                if (pct <= -5 && !pinnedDownSymbols.has(item.symbol)) pinnedDownSymbols.set(item.symbol, now);
-            });
-            sessionStorage.setItem('pinnedUp',   JSON.stringify([...pinnedUpSymbols]));
-            sessionStorage.setItem('pinnedDown', JSON.stringify([...pinnedDownSymbols]));
+    function clearAllPins() {
+        const btn = document.getElementById('clear-pin-btn');
+        if (!pinsCleared) {
+            // ── 第一次：取消置顶，记录黑名单 ──
+            pinnedUpSymbols.forEach((_, s) => manuallyUnpinned.add(s));
+            pinnedDownSymbols.forEach((_, s) => manuallyUnpinned.add(s));
+            sessionStorage.setItem('manuallyUnpinned', JSON.stringify([...manuallyUnpinned]));
+            pinnedUpSymbols.clear();
+            pinnedDownSymbols.clear();
+            sessionStorage.removeItem('pinnedUp');
+            sessionStorage.removeItem('pinnedDown');
+            pinsCleared = true;
+            btn.textContent = '📌 恢复置顶';
+            btn.style.borderColor = '#f0a500';
+            btn.style.color = '#f0a500';
+        } else {
+            // ── 第二次：清空黑名单，下次刷新重新自动置顶 ──
+            manuallyUnpinned.clear();
+            sessionStorage.removeItem('manuallyUnpinned');
+            pinsCleared = false;
+            btn.textContent = '📌 取消置顶';
+            btn.style.borderColor = '#555';
+            btn.style.color = '#ccc';
         }
+        renderTable();
+    }
 
-        /**
-         * 判断 symbol 是否处于置顶状态
-         * 规则：
-         *   1. 曾触发5%涨/跌幅（在 Map 中）才有资格置顶
-         *   2. 实时当天涨跌额绝对值 >= 0.5 → 永久置顶
-         *   3. 实时当天涨跌额绝对值 < 0.5  → 仅保留首次触发后10分钟
-         *   4. 超过10分钟且涨跌额 < 0.5    → 退出置顶
-         *   5. 退出后若涨跌额重新 >= 0.5   → 重新置顶（回到规则2）
-         */
-        function isPinnedActive(item, side) {
-            const map = side === 'up' ? pinnedUpSymbols : pinnedDownSymbols;
-            if (!map.has(item.symbol)) return false;
+    function resetTimer()         { countdown = 3; updateTimerDisplay(); }
+    function updateTimerDisplay() { document.getElementById('refresh-timer').textContent = `${countdown}s 后刷新`; }
 
-            const changeAmount = Math.abs(Number(item.change_amount));
-
-            // 规则2/5：实时涨跌额 >= 0.5 永久/重新置顶
-            if (changeAmount >= 0.5) return true;
-
-            // 规则3：涨跌额 < 0.5，看10分钟窗口
-            const firstTime = map.get(item.symbol);
-            return Date.now() - firstTime < PIN_KEEP_MS;
-        }
-
-        // 生成置顶标记文字（永久📌 / 临时显示剩余分钟⏱）
-        function getPinnedMark(item, side) {
-            const map = side === 'up' ? pinnedUpSymbols : pinnedDownSymbols;
-            if (!map.has(item.symbol)) return '';
-            const changeAmount = Math.abs(Number(item.change_amount));
-            if (changeAmount >= 0.5) return ' 📌';
-            const firstTime = map.get(item.symbol);
-            const remainMs = PIN_KEEP_MS - (Date.now() - firstTime);
-            if (remainMs <= 0) return '';
-            const remainMin = Math.ceil(remainMs / 60000);
-            return ` ⏱${remainMin}m`;
-        }
-
-        // ── 预警置顶（闪色行优先于5%置顶）────────────────────────────────
-        function isActiveWarning(item, side) {
-            const s = symbolStates[item.symbol];
-            if (!s?.warning?.active) return false;
-            if (s.warning.direction !== side) return false;
-            const c = get1mChange(item.symbol, Number(item.last_price));
-            return c !== null && Math.abs(c) >= 0.5;
-        }
-
-        function toggleView() {
-            viewMode = viewMode === 'dual' ? 'full' : 'dual';
-            renderTable();
-        }
-
-        function debounceFetch() {
-            clearTimeout(debounceTimer);
-            debounceTimer = setTimeout(() => fetchData(), 500);
-        }
-
-        function get2mChange(symbol, currentPrice) {
-            const state = symbolStates[symbol];
-            if (!state || state.history.length === 0) return null;
-            const now = Date.now();
-            const old = state.history.find(h => h.t >= now - 120000) || state.history[0];
-            return currentPrice - old.p;
-        }
-
-        function get1mChange(symbol, currentPrice) {
-            const state = symbolStates[symbol];
-            if (!state || state.history.length === 0) return null;
-            const now = Date.now();
-            const old = state.history.find(h => h.t >= now - 60000) || state.history[0];
-            return currentPrice - old.p;
-        }
-
-        function handleDualSort(side, col) {
-            const current = dualSort[side];
-            if (current.col === col) {
-                current.dir = current.dir === 'desc' ? 'asc' : 'desc';
-            } else {
-                current.col = col;
-                current.dir = 'desc';
-            }
-            renderTable();
-        }
-
-        let isFetching = false;
-
-        function processWarnings(data) {
-            const now = Date.now();
-            data.forEach(item => {
-                const currentPrice = Number(item.last_price);
-                if (isNaN(currentPrice)) return;
-
-                let state = symbolStates[item.symbol];
-                if (!state) {
-                    state = { history: [], warning: { active: false } };
-                    symbolStates[item.symbol] = state;
-                }
-
-                state.history.push({ t: now, p: currentPrice });
-                while (state.history.length > 0 && now - state.history[0].t > 120000) {
-                    state.history.shift();
-                }
-
-                if (state.history.length > 0) {
-                    const nowMs = Date.now();
-
-                    // 1分钟涨跌
-                    const ref1m = state.history.find(h => h.t >= nowMs - 60000) || state.history[0];
-                    const change1m = currentPrice - ref1m.p;
-                    const abs1m = Math.abs(change1m);
-
-                    // 2分钟涨跌
-                    const ref2m = state.history.find(h => h.t >= nowMs - 120000) || state.history[0];
-                    const change2m = currentPrice - ref2m.p;
-                    const abs2m = Math.abs(change2m);
-
-                    // 任一条件触发预警
-                    const triggered = abs1m > 0.5 || abs2m > 0.8;
-                    const direction = change1m !== 0 ? (change1m > 0 ? 'up' : 'down') : (change2m > 0 ? 'up' : 'down');
-                    const absChange = Math.max(abs1m, abs2m);
-
-                    if (state.warning.active) {
-                        if (nowMs > state.warning.endTime) {
-                            if (triggered) {
-                                state.warning = {
-                                    active: true,
-                                    startTime: nowMs,
-                                    endTime: nowMs + 5 * 60 * 1000,
-                                    maxChange: absChange,
-                                    direction
-                                };
-                            } else {
-                                state.warning.active = false;
-                            }
-                        } else {
-                            if (absChange > state.warning.maxChange) {
-                                state.warning.maxChange = absChange;
-                                const maxEndTime = state.warning.startTime + 30 * 60 * 1000;
-                                state.warning.endTime = Math.min(nowMs + 5 * 60 * 1000, maxEndTime);
-                                state.warning.direction = direction;
-                            }
-                        }
-                    } else {
-                        if (triggered) {
-                            state.warning = {
-                                active: true,
-                                startTime: nowMs,
-                                endTime: nowMs + 5 * 60 * 1000,
-                                maxChange: absChange,
-                                direction
-                            };
-                        }
-                    }
-                }
-            });
-        }
-
-        async function fetchData() {
-            if (isFetching) return;
-            isFetching = true;
-            try {
-                const minVol = document.getElementById('min-volume').value;
-                const res = await fetch(`/api/ranking?min_volume=${minVol}`);
-                if (!res.ok) throw new Error('Network response was not ok');
-                currentData = await res.json();
-                processWarnings(currentData);
-                updatePinned(currentData);
-                renderTable();
-                resetTimer();
-            } catch (err) {
-                console.error('Fetch error:', err);
-                if (!currentData || currentData.length === 0) {
-                    document.getElementById('content').innerHTML = `<div class="error">加载失败: ${err.message}</div>`;
-                }
-            } finally {
-                isFetching = false;
-            }
-        }
-
-        function formatNumber(num, decimals = 2) {
-            if (num === null || num === undefined) return '-';
-            return Number(num).toFixed(decimals);
-        }
-
-        function formatVolume(num) {
-            if (num === null || num === undefined) return '-';
-            if (num >= 1000000) return (num / 1000000).toFixed(2) + 'M';
-            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-            return num;
-        }
-
-        function renderTable() {
-            if (!currentData || currentData.length === 0) {
-                // 如果是首次加载或获取不到数据
-                let emptyMsg = document.getElementById('empty-message');
-                if (!emptyMsg) {
-                    emptyMsg = document.createElement('div');
-                    emptyMsg.id = 'empty-message';
-                    emptyMsg.className = 'loading';
-                    document.getElementById('content').appendChild(emptyMsg);
-                }
-                emptyMsg.style.display = 'block';
-                emptyMsg.textContent = '暂无数据';
-                return;
-            }
-
-            // 筛选
-            const minPrice    = parseFloat(document.getElementById('min-price').value)    || 0;
-            const maxPrice    = parseFloat(document.getElementById('max-price').value)    || Infinity;
-            const min2mChange = parseFloat(document.getElementById('min-2m-change').value) || 0;
-            const filter5Pct  = document.getElementById('filter-5pct').checked;
-
-            const filteredData = currentData.filter(item => {
-                const p = Number(item.last_price);
-                const pct = Math.abs(Number(item.change_pct));
-                if (p < minPrice || p > maxPrice) return false;
-                if (filter5Pct && pct <= 5) return false;
-                if (min2mChange > 0) {
-                    const c2m = get2mChange(item.symbol, Number(item.last_price));
-                    if (c2m === null || Math.abs(c2m) < min2mChange) return false;
-                }
-                return true;
-            });
-
-            if (filteredData.length === 0) {
-                // hide skeleton if data is empty, but don't destroy it to allow recovery
-                let skeleton = document.getElementById('ranking-skeleton');
-                if (skeleton) skeleton.style.display = 'none';
-                
-                let emptyMsg = document.getElementById('empty-message');
-                if (!emptyMsg) {
-                    emptyMsg = document.createElement('div');
-                    emptyMsg.id = 'empty-message';
-                    emptyMsg.className = 'loading';
-                    document.getElementById('content').appendChild(emptyMsg);
-                }
-                emptyMsg.style.display = 'block';
-                emptyMsg.textContent = '暂无符合条件的数据';
-                return;
-            } else {
-                let emptyMsg = document.getElementById('empty-message');
-                if (emptyMsg) emptyMsg.style.display = 'none';
-                
-                let skeleton = document.getElementById('ranking-skeleton');
-                if (skeleton) skeleton.style.display = 'grid'; // .dual-panel uses grid
-            }
-
-            // dual 模式：只保留 5% 置顶，变色预警不再置顶
-            const sorted = [...filteredData].sort((a, b) => Number(b.change_pct) - Number(a.change_pct));
-
-            const pinnedUp    = sorted.filter(x => isPinnedActive(x, 'up'));
-            const normalUp    = sorted.filter(x => !isPinnedActive(x, 'up')   && Number(x.change_pct) >= 0);
-
-            const pinnedDown  = sorted.filter(x => isPinnedActive(x, 'down'));
-            const normalDown  = sorted.filter(x => !isPinnedActive(x, 'down') && Number(x.change_pct) <= -0.001);
-
-            const topGainers = [...pinnedUp,   ...normalUp  ];
-            const topLosers  = [...pinnedDown, ...normalDown];
-
-            // 增量 DOM 更新 (DOM Patching)
-            let skeleton = document.getElementById('ranking-skeleton');
-            if (!skeleton) {
-                document.getElementById('content').innerHTML = `
-                    <div class="dual-panel" id="ranking-skeleton">
-                        <div class="panel panel-up">
-                            <div class="panel-title up">▲ 涨幅榜</div>
-                            <table>
-                                <thead id="thead-up"></thead>
-                                <tbody id="tbody-up"></tbody>
-                            </table>
-                        </div>
-                        <div class="panel panel-down">
-                            <div class="panel-title down">▼ 跌幅榜</div>
-                            <table>
-                                <thead id="thead-down"></thead>
-                                <tbody id="tbody-down"></tbody>
-                            </table>
-                        </div>
-                    </div>`;
-            }
-
-            const updateSide = (list, side) => {
-                const { col, dir } = dualSort[side];
-
-                // 分组：置顶 > 普通
-                const pinned  = list.filter(x => isPinnedActive(x, side));
-                const normal  = list.filter(x => !isPinnedActive(x, side) && (
-                    side === 'up' ? Number(x.change_pct) > -0.001 : Number(x.change_pct) <= -0.001
-                ));
-
-                const sortFn = (a, b) => {
-                    let valA, valB;
-                    if (col === '2m') {
-                        valA = get2mChange(a.symbol, Number(a.last_price)) ?? -Infinity;
-                        valB = get2mChange(b.symbol, Number(b.last_price)) ?? -Infinity;
-                    } else {
-                        valA = Number(a[col]);
-                        valB = Number(b[col]);
-                    }
-                    return dir === 'desc' ? valB - valA : valA - valB;
-                };
-
-                // 每侧最多显示 250 条
-                const sortedList = [...pinned.sort(sortFn), ...normal.sort(sortFn)].slice(0, 250);
-
-                const icon = (c) => {
-                    if (dualSort[side].col !== c) return '<span style="color:#555">↕</span>';
-                    return dualSort[side].dir === 'asc' ? '↑' : '↓';
-                };
-                const thCls = (c) => dualSort[side].col === c
-                    ? 'style="color:#007acc;cursor:pointer"'
-                    : 'style="cursor:pointer"';
-
-                // 更新表头
-                document.getElementById(`thead-${side}`).innerHTML = `
-                    <tr>
-                        <th style="text-align:center">#</th>
-                        <th style="text-align:left">代码</th>
-                        <th onclick="handleDualSort('${side}','last_price')"    ${thCls('last_price')}>最新价 ${icon('last_price')}</th>
-                        <th onclick="handleDualSort('${side}','open_price')"    ${thCls('open_price')}>开盘价 ${icon('open_price')}</th>
-                        <th onclick="handleDualSort('${side}','change_amount')" ${thCls('change_amount')}>涨跌额 ${icon('change_amount')}</th>
-                        <th onclick="handleDualSort('${side}','change_pct')"    ${thCls('change_pct')}>${side === 'up' ? '涨幅%' : '跌幅%'} ${icon('change_pct')}</th>
-                        <th onclick="handleDualSort('${side}','total_volume')"  ${thCls('total_volume')}>成交量 ${icon('total_volume')}</th>
-                        <th onclick="handleDualSort('${side}','2m')"            ${thCls('2m')}>2分涨跌 ${icon('2m')}</th>
-                    </tr>`;
-
-                // 更新表体 (增量 Patch)
-                const tbody = document.getElementById(`tbody-${side}`);
-                let childIndex = 0;
-
-                sortedList.forEach((item, i) => {
-                    const safeSymbol = item.symbol.replace(/[^a-zA-Z0-9]/g, '-');
-                    const rowId = `row-${side}-${safeSymbol}`;
-                    let tr = document.getElementById(rowId);
-                    
-                    if (!tr) {
-                        tr = document.createElement('tr');
-                        tr.id = rowId;
-                        tbody.insertBefore(tr, tbody.children[childIndex] || null);
-                    } else if (tbody.children[childIndex] !== tr) {
-                        // 如果位置不对，移动到正确位置
-                        tbody.insertBefore(tr, tbody.children[childIndex] || null);
-                    }
-                    childIndex++;
-
-                    const changeClass = Number(item.change_pct) >= 0 ? 'up' : 'down';
-                    const isWarning   = isActiveWarning(item, side);
-                    const isPinned    = isPinnedActive(item, side);
-                    const pinnedMark  = getPinnedMark(item, side);
-                    const borderColor = side === 'up' ? '#26a69a' : '#ef5350';
-                    const leftBorder  = isPinned ? `3px solid ${borderColor}` : '';
-                    const warningBg   = isWarning 
-                        ? (side === 'up' ? 'rgba(38,166,154,0.2)' : 'rgba(239,83,80,0.2)') 
-                        : '';
-                    
-                    if (tr.style.borderLeft !== leftBorder) tr.style.borderLeft = leftBorder;
-                    if (tr.style.backgroundColor !== warningBg) tr.style.backgroundColor = warningBg;
-
-                    // 2分钟涨跌
-                    const change2m = get2mChange(item.symbol, Number(item.last_price));
-                    const change2mClass = change2m > 0 ? 'up' : (change2m < 0 ? 'down' : 'flat');
-                    const change2mStr = change2m !== null
-                        ? `<span class="${change2mClass}">${change2m > 0 ? '+' : ''}${change2m.toFixed(2)}</span>`
-                        : '-';
-
-                    const newHtml = `
-                        <td style="text-align:center;color:#666">${i + 1}${pinnedMark}</td>
-                        <td class="symbol">${item.symbol}</td>
-                        <td class="${changeClass}">${formatNumber(item.last_price)}</td>
-                        <td>${formatNumber(item.open_price)}</td>
-                        <td class="${changeClass}">${item.change_amount > 0 ? '+' : ''}${formatNumber(item.change_amount)}</td>
-                        <td class="${changeClass}">${item.change_pct > 0 ? '+' : ''}${formatNumber(item.change_pct)}%</td>
-                        <td>${formatVolume(item.total_volume)}</td>
-                        <td>${change2mStr}</td>
-                    `;
-
-                    if (tr._lastHtml !== newHtml) {
-                        tr.innerHTML = newHtml;
-                        tr._lastHtml = newHtml;
-                    }
-                });
-
-                // 移除多余的旧行
-                while (tbody.children.length > sortedList.length) {
-                    tbody.removeChild(tbody.lastChild);
-                }
-            };
-
-            updateSide(topGainers, 'up');
-            updateSide(topLosers, 'down');
-        }
-
-        function resetTimer() {
-            countdown = 3;
-            updateTimerDisplay();
-        }
-
-        function updateTimerDisplay() {
-            document.getElementById('refresh-timer').textContent = `${countdown}s 后刷新`;
-        }
-
-        // Initialize
-        fetchData();
-
-        setInterval(() => {
-            countdown--;
-            if (countdown <= 0) {
-                fetchData();
-            } else {
-                updateTimerDisplay();
-            }
-        }, 1000);
-    </script>
+    fetchData();
+    setInterval(() => { countdown-- <= 0 ? fetchData() : updateTimerDisplay(); }, 1000);
+</script>
 </body>
 </html>

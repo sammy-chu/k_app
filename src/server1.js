@@ -38,17 +38,17 @@ pool.on('error', (err) => {
   console.error('Unexpected error on idle client', err.message);
 });
 
-// [FIX 1] 独立连接池，专供 PriceWindow、PriceCache 和 QuoteCache
+// [FIX 1] 独立连接池，专供 PriceWindow 和 PriceCache
 const pricePool = new Pool({
   host: process.env.PGHOST || 'localhost',
   port: Number(process.env.PGPORT || 5432),
   database: process.env.PGDATABASE || 'ppro8_market_data',
   user: process.env.PGUSER || 'postgres',
   password: process.env.PGPASSWORD || 'postgres',
-  max: 10,
+  max: 5,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
-  statement_timeout: 15000,
+  connectionTimeoutMillis: 5000,
+  statement_timeout: 8000,
 });
 
 pricePool.on('connect', (client) => {
@@ -208,84 +208,6 @@ try {
 // In-memory price snapshot cache: symbol -> { price, receivedAt }
 const priceCache = new Map();
 
-// L1 quote cache: symbol -> { bid, ask, spread, receivedAt }
-// 冷启动：LATERAL 取5分钟内每个 symbol 最新一条（只跑一次）
-// 之后每10秒：只扫 received_at >= NOW()-30s 的增量行，merge 进缓存
-// 依赖索引: idx_l1_quote_bl_received_at (received_at DESC)  → 0.67ms / 3841行
-const quoteCache = new Map();
-let quoteCacheInitialized = false;
-
-async function initQuoteCache() {
-  // 冷启动改用与增量相同的扫描方式（走 idx_l1_quote_bl_received_at，极快）
-  // 用较大窗口（10分钟）尽量覆盖更多 symbol，失败也不阻塞启动
-  const windows = ['10 minutes', '30 minutes', '60 minutes'];
-  for (const w of windows) {
-    try {
-      const { rows } = await pricePool.query(`
-        SELECT symbol,
-               bid::numeric AS bid,
-               ask::numeric AS ask,
-               received_at
-        FROM market_data.l1_quote_bl
-        WHERE received_at >= NOW() - INTERVAL '${w}'
-          AND bid IS NOT NULL AND bid::numeric > 0
-          AND ask IS NOT NULL AND ask::numeric > 0
-        ORDER BY received_at DESC
-      `);
-      const seen = new Set();
-      for (const row of rows) {
-        if (seen.has(row.symbol)) continue;
-        seen.add(row.symbol);
-        const bid    = Number(row.bid);
-        const ask    = Number(row.ask);
-        const spread = Number((ask - bid).toFixed(4));
-        quoteCache.set(row.symbol, { bid, ask, spread, receivedAt: row.received_at });
-      }
-      quoteCacheInitialized = true;
-      console.log(`[QuoteCache] Cold-start done (window=${w}), ${quoteCache.size} symbols loaded`);
-      return;
-    } catch (err) {
-      console.error(`[QuoteCache] Cold-start failed (window=${w}):`, err.message);
-    }
-  }
-  // 所有窗口都失败，仍标记完成让增量接管
-  quoteCacheInitialized = true;
-  console.log(`[QuoteCache] Cold-start skipped, incremental update will populate cache`);
-}
-
-async function updateQuoteCache() {
-  // 冷启动未完成时跳过增量更新，避免覆盖空缓存
-  if (!quoteCacheInitialized) return;
-  try {
-    // 增量：只扫最近30秒新增的行，走 idx_l1_quote_bl_received_at
-    // 实测：0.67ms，70 buffers全部 shared hit，无磁盘读
-    const { rows } = await pricePool.query(`
-      SELECT symbol,
-             bid::numeric AS bid,
-             ask::numeric AS ask,
-             received_at
-      FROM market_data.l1_quote_bl
-      WHERE received_at >= NOW() - INTERVAL '30 seconds'
-        AND bid IS NOT NULL AND bid::numeric > 0
-        AND ask IS NOT NULL AND ask::numeric > 0
-      ORDER BY received_at DESC
-    `);
-
-    // 每个 symbol 只保留最新一条（ORDER BY DESC，第一次出现的就是最新的）
-    const seen = new Set();
-    for (const row of rows) {
-      if (seen.has(row.symbol)) continue;
-      seen.add(row.symbol);
-      const bid    = Number(row.bid);
-      const ask    = Number(row.ask);
-      const spread = Number((ask - bid).toFixed(4));
-      quoteCache.set(row.symbol, { bid, ask, spread, receivedAt: row.received_at });
-    }
-  } catch (err) {
-    console.error('[QuoteCache] Incremental update failed:', err.message);
-  }
-}
-
 // [FIX 2] updatePriceCache 改用 LATERAL 逐 symbol 取最新价
 // 避免 DISTINCT ON 全表扫描 + 磁盘排序（原耗时 9.7s -> 29ms）
 async function updatePriceCache() {
@@ -322,7 +244,7 @@ async function updatePriceWindow() {
     const { rows } = await client.query(`
       SELECT symbol, price::numeric AS price, received_at
       FROM tos_trades
-      WHERE received_at >= NOW() - INTERVAL '2 minutes'
+      WHERE received_at >= NOW() - INTERVAL '4 minutes'
         AND received_at >= current_date AT TIME ZONE 'Asia/Shanghai' + interval '8 hours'
       ORDER BY symbol, received_at ASC, id ASC
     `);
@@ -781,38 +703,42 @@ app.get('/api/price-swing-screener', (req, res) => {
       const lastPrice = Number(row.last_price);
       if (!lastPrice) continue;
 
-      // 无实时窗口数据直接跳过，不用 daily 兜底
-      const win = priceWindow.get(row.symbol);
-      if (!win || win.length < 2) continue;
-
-      // 2分钟窗口内高低价 & 波动额
-      let windowHigh = win[0].price;
-      let windowLow  = win[0].price;
-      for (const e of win) {
-        if (e.price > windowHigh) windowHigh = e.price;
-        if (e.price < windowLow)  windowLow  = e.price;
-      }
-      const swing = windowHigh - windowLow;
-
-      // 2分钟窗口内涨跌：最旧价 -> 最新价
-      const priceStart  = win[0].price;
-      const priceEnd    = win[win.length - 1].price;
-      const changeAmt2m = Number((priceEnd - priceStart).toFixed(3));
-      const changePct2m = priceStart > 0
-        ? Number(((priceEnd - priceStart) / priceStart * 100).toFixed(2))
-        : 0;
-
       const rule = getSwingRule(lastPrice);
 
-      if (swing >= rule.minSwing && Math.abs(changePct2m) >= rule.minChangePct) {
+      // 优先用 priceWindow（4分钟实时），退回用 daily_summary high/low
+      const win = priceWindow.get(row.symbol);
+      let windowHigh = 0;
+      let windowLow  = 0;
+      let swing      = 0;
+      let swingSource = 'daily';
+
+      if (win && win.length > 1) {
+        windowHigh = win[0].price;
+        windowLow  = win[0].price;
+        for (const e of win) {
+          if (e.price > windowHigh) windowHigh = e.price;
+          if (e.price < windowLow)  windowLow  = e.price;
+        }
+        swing = windowHigh - windowLow;
+        swingSource = 'realtime';
+      } else if (row.high_price > 0 && row.low_price > 0) {
+        windowHigh  = row.high_price;
+        windowLow   = row.low_price;
+        swing       = row.high_price - row.low_price;
+        swingSource = 'daily';
+      }
+
+      const changePct = Math.abs(Number(row.change_pct));
+
+      if (swing >= rule.minSwing && changePct >= rule.minChangePct) {
         results.push({
           symbol:              row.symbol,
           open_price:          row.open_price,
-          last_price:          priceEnd,
-          change_pct:          changePct2m,
-          change_amount:       changeAmt2m,
+          last_price:          lastPrice,
+          change_pct:          row.change_pct,
+          change_amount:       Number(row.change_amount.toFixed(3)),
           swing:               Number(swing.toFixed(3)),
-          swing_source:        'realtime',
+          swing_source:        swingSource,
           window_high:         Number(windowHigh.toFixed(3)),
           window_low:          Number(windowLow.toFixed(3)),
           total_volume:        row.total_volume,
@@ -828,130 +754,6 @@ app.get('/api/price-swing-screener', (req, res) => {
   } catch (e) {
     console.error('[SwingScreener] error:', e);
     res.status(500).json({ error: 'swing_screener_failed' });
-  }
-});
-
-// === 自由选股器 API ===
-app.get('/api/screener', (req, res) => {
-  try {
-    const q = req.query;
-
-    // AND / OR 逻辑模式，默认 AND
-    const logic = (q.logic || 'and').toLowerCase() === 'or' ? 'or' : 'and';
-
-    // 价格区间
-    const priceMin = q.price_min !== undefined && q.price_min !== '' ? Number(q.price_min) : null;
-    const priceMax = q.price_max !== undefined && q.price_max !== '' ? Number(q.price_max) : null;
-
-    // 涨跌幅区间（支持负数）
-    const changMin = q.change_min !== undefined && q.change_min !== '' ? Number(q.change_min) : null;
-    const changMax = q.change_max !== undefined && q.change_max !== '' ? Number(q.change_max) : null;
-
-    // 量比区间（total_volume / avg_vol_10d）
-    const volRatioMin = q.vol_ratio_min !== undefined && q.vol_ratio_min !== '' ? Number(q.vol_ratio_min) : null;
-    const volRatioMax = q.vol_ratio_max !== undefined && q.vol_ratio_max !== '' ? Number(q.vol_ratio_max) : null;
-
-    // 绝对成交量下限
-    const volMin = q.vol_min !== undefined && q.vol_min !== '' ? Number(q.vol_min) : null;
-
-    // 价差区间 (ask - bid)
-    const spreadMin = q.spread_min !== undefined && q.spread_min !== '' ? Number(q.spread_min) : null;
-    const spreadMax = q.spread_max !== undefined && q.spread_max !== '' ? Number(q.spread_max) : null;
-
-    // 是否有任何条件
-    const hasPrice    = priceMin    !== null || priceMax    !== null;
-    const hasChange   = changMin    !== null || changMax    !== null;
-    const hasVolRatio = volRatioMin !== null || volRatioMax !== null;
-    const hasVol      = volMin      !== null;
-    const hasSpread   = spreadMin   !== null || spreadMax   !== null;
-    const hasAny      = hasPrice || hasChange || hasVolRatio || hasVol || hasSpread;
-
-    const results = [];
-
-    for (const row of rankingCache) {
-      const price     = Number(row.last_price);
-      const changePct = Number(row.change_pct);
-      const vol       = Number(row.total_volume) || 0;
-      const avgVol    = Number(row.avg_vol_10d)  || 0;
-      const volRatio  = avgVol > 0 ? vol / avgVol : 0;
-
-      if (!price) continue;
-
-      // 从 quoteCache 取 bid/ask/价差
-      const quote  = quoteCache.get(row.symbol);
-      const bid    = quote ? quote.bid    : null;
-      const ask    = quote ? quote.ask    : null;
-      const spread = quote ? quote.spread : null;
-
-      // 无任何条件时返回全部
-      if (!hasAny) {
-        results.push({ symbol: row.symbol, last_price: price, open_price: row.open_price,
-          change_pct: changePct, change_amount: Number(row.change_amount),
-          total_volume: vol, avg_vol_10d: avgVol,
-          vol_ratio: avgVol > 0 ? Number(volRatio.toFixed(2)) : null,
-          high_price: row.high_price, low_price: row.low_price,
-          bid, ask, spread });
-        continue;
-      }
-
-      // 每个条件组：先判断该组是否"激活"，再判断是否"命中"
-      const priceHit = !hasPrice || (
-        (priceMin === null || price     >= priceMin) &&
-        (priceMax === null || price     <= priceMax)
-      );
-      const changeHit = !hasChange || (
-        (changMin  === null || changePct >= changMin) &&
-        (changMax  === null || changePct <= changMax)
-      );
-      const volRatioHit = !hasVolRatio || (
-        (volRatioMin === null || volRatio >= volRatioMin) &&
-        (volRatioMax === null || volRatio <= volRatioMax)
-      );
-      const volHit    = !hasVol    || vol >= volMin;
-      const spreadHit = !hasSpread || (spread !== null && (
-        (spreadMin === null || spread >= spreadMin) &&
-        (spreadMax === null || spread <= spreadMax)
-      ));
-
-      // AND：全部激活的条件组都要命中；OR：任一命中即可
-      let pass;
-      if (logic === 'and') {
-        pass = priceHit && changeHit && volRatioHit && volHit && spreadHit;
-      } else {
-        const hits = [
-          hasPrice    && priceHit,
-          hasChange   && changeHit,
-          hasVolRatio && volRatioHit,
-          hasVol      && volHit,
-          hasSpread   && spreadHit,
-        ].filter((_, i) => [hasPrice, hasChange, hasVolRatio, hasVol, hasSpread][i]);
-        pass = hits.some(Boolean);
-      }
-
-      if (pass) {
-        results.push({
-          symbol:        row.symbol,
-          last_price:    price,
-          open_price:    row.open_price,
-          change_pct:    changePct,
-          change_amount: Number(row.change_amount),
-          total_volume:  vol,
-          avg_vol_10d:   avgVol,
-          vol_ratio:     avgVol > 0 ? Number(volRatio.toFixed(2)) : null,
-          high_price:    row.high_price,
-          low_price:     row.low_price,
-          bid,
-          ask,
-          spread,
-        });
-      }
-    }
-
-    results.sort((a, b) => b.change_pct - a.change_pct);
-    res.json(results);
-  } catch (e) {
-    console.error('[Screener] error:', e);
-    res.status(500).json({ error: 'screener_failed' });
   }
 });
 
@@ -1641,13 +1443,6 @@ function startAlertMonitor() {
 
   runScan('PriceCache', updatePriceCache, 10000);
 
-  console.log(`[QuoteCache] cold-start initializing in 15s...`);
-  setTimeout(() => {
-    initQuoteCache().then(() => {
-      runScan('QuoteCache', updateQuoteCache, 10000);
-    });
-  }, 15000);
-
   console.log(`[PriceWindow] starting, interval=10s`);
   updatePriceWindow();
   runScan('PriceWindow', updatePriceWindow, 10000);
@@ -1677,7 +1472,6 @@ app.get('/ranking',         (req, res) => res.sendFile(path.join(__dirname, '../
 app.get('/large-orders',    (req, res) => res.sendFile(path.join(__dirname, '../public/large-orders.html')));
 app.get('/l2-alerts',       (req, res) => res.sendFile(path.join(__dirname, '../public/l2_alert_history.html')));
 app.get('/swing-screener',  (req, res) => res.sendFile(path.join(__dirname, '../public/swing-screener.html')));
-app.get('/screener',        (req, res) => res.sendFile(path.join(__dirname, '../public/screener.html')));
 
 ensureTables().then(() => {
   startAlertMonitor();
