@@ -240,11 +240,39 @@
   ::-webkit-scrollbar       { width: 5px; height: 5px; }
   ::-webkit-scrollbar-track { background: var(--bg); }
   ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  /* ── 导航 ── */
+  .nav-links {
+    text-align: center;
+    padding: 10px 0;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+  .nav-links a {
+    color: var(--accent); text-decoration: none; padding: 6px 14px; margin: 0 6px;
+    border: 1px solid var(--accent); border-radius: 4px; transition: all 0.2s;
+    display: inline-block; font-size: 13px; font-family: var(--sans);
+  }
+  .nav-links a:hover { background-color: var(--accent); color: var(--bg); }
+  .nav-links a.active { background-color: var(--accent); color: var(--bg); }
 </style>
 </head>
 <body>
 
 <div class="top-fixed">
+
+  <!-- 导航 -->
+  <div class="nav-links">
+    <a href="/alerts">价格提醒</a>
+    <a href="/volume-alerts">放量提醒</a>
+    <a href="/hills">山丘形态</a>
+    <a href="/hill-alerts">山丘放量</a>
+    <a href="/ranking">涨跌排名</a>
+    <a href="/l2-alerts">L2大单</a>
+    <a href="/screener" class="active">选股器</a>
+    <a href="/swing-screener">波段扫描</a>
+    <a href="/stable-screener">稳定选股</a>
+  </div>
 
   <div class="header">
     <div class="header-left">
