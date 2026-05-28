@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>山丘放量提醒列表</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1a1a1a;
+            color: #ddd;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .container { max-width: 1000px; margin: 0 auto; }
+        .nav-links { text-align: center; margin-bottom: 30px; }
+        .nav-links a {
+            color: #007acc;
+            text-decoration: none;
+            padding: 8px 16px;
+            margin: 0 10px;
+            border: 1px solid #007acc;
+            border-radius: 4px;
+            transition: all 0.2s;
+            display: inline-block;
+        }
+        .nav-links a:hover { background-color: #007acc; color: white; }
+        .nav-links a.active { background-color: #007acc; color: white; }
+        
+        .header { margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+        h1 { font-size: 1.5em; font-weight: normal; }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 5px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover { background: #0099ff; }
+
+        .card-list { display: flex; flex-direction: column; gap: 15px; }
+        .card {
+            background: #2a2a2a;
+            border: 1px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .card-info { flex: 1; }
+        .symbol { font-size: 1.2em; color: #fff; font-weight: bold; margin-bottom: 5px; }
+        .meta { font-size: 0.9em; color: #aaa; display: flex; gap: 15px; flex-wrap: wrap; }
+        .meta span { display: flex; align-items: center; gap: 5px; }
+        
+        .ratio-badge {
+            background: #333;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #4caf50;
+            font-weight: bold;
+        }
+
+        .chart-container {
+            width: 300px;
+            height: 80px;
+            display: flex;
+            align-items: flex-end;
+            gap: 2px;
+            padding-bottom: 5px;
+            border-bottom: 1px solid #444;
+            margin-left: 20px;
+        }
+        .bar {
+            flex: 1;
+            background: #007acc;
+            min-height: 2px;
+            transition: height 0.3s;
+            position: relative;
+        }
+        .bar.peak { background: #ff5722; }
+        .bar:hover::after {
+            content: attr(data-vol);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.8);
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-size: 10px;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 10;
+        }
+        
+        .loading { text-align: center; color: #666; padding: 20px; }
+        .empty { text-align: center; color: #666; padding: 20px; }
+        .error { color: #f44336; }
+        #debug-log {
+            margin-top: 20px;
+            padding: 10px;
+            background: #000;
+            color: #0f0;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            display: none; /* Hide by default, show on error or long loading */
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-links">
+            <a href="/">K线图表</a>
+            <a href="/alerts">价格提醒</a>
+            <a href="/volume-alerts">成交量提醒</a>
+            <a href="/hills">山丘扫描</a>
+            <a href="/hill-alerts" class="active">山丘提醒</a>
+            <a href="/ranking">涨跌排名</a>
+            <a href="/l2-alerts">L2大单</a>
+        
+            <a href="/screener">选股器</a>
+        </div>
+
+        <div class="header">
+            <h1>山丘放量提醒列表</h1>
+            <div class="controls">
+                <label for="minRatio" style="font-size: 14px; color: #aaa;">最小倍数:</label>
+                <input type="number" id="minRatio" value="5.0" step="0.5" style="width: 60px; padding: 4px; background: #333; border: 1px solid #444; color: #fff; border-radius: 4px; margin-right: 10px;">
+                <button onclick="loadData()">刷新</button>
+            </div>
+        </div>
+
+        <div id="content" class="card-list">
+            <div class="loading">加载中...</div>
+        </div>
+        
+        <div id="debug-log"></div>
+    </div>
+
+    <script>
+        // Global error handler
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            const logEl = document.getElementById('debug-log');
+            if (logEl) {
+                logEl.style.display = 'block';
+                logEl.textContent += `Global Error: ${msg} at ${lineNo}:${columnNo}\n`;
+            }
+            const container = document.getElementById('content');
+            if (container) {
+                container.innerHTML = `<div style="color:red">页面错误: ${msg}</div>`;
+            }
+            return false;
+        };
+
+        function log(msg) {
+            console.log(msg);
+            const logEl = document.getElementById('debug-log');
+            logEl.style.display = 'block';
+            logEl.textContent += msg + '\n';
+        }
+
+        async function loadData(isBackground = false) {
+            const container = document.getElementById('content');
+            const minRatioInput = document.getElementById('minRatio');
+            const minRatio = minRatioInput ? minRatioInput.value : 5.0;
+
+            if (!isBackground) {
+                container.innerHTML = '<div class="loading">正在加载数据...</div>';
+                document.getElementById('debug-log').textContent = ''; // Clear log
+                log('开始加载数据...');
+            }
+            
+            try {
+                if (!isBackground) log(`Fetching /api/hill-alerts with min_ratio=${minRatio}...`);
+                const res = await fetch(`/api/hill-alerts?limit=50&min_ratio=${minRatio}`);
+                if (!isBackground) log(`Response status: ${res.status}`);
+                
+                if (!res.ok) {
+                    throw new Error(`HTTP error! status: ${res.status}`);
+                }
+                
+                if (!isBackground) log('Parsing JSON...');
+                const data = await res.json();
+                if (!isBackground) log(`Got ${data ? data.length : 0} records`);
+                
+                renderData(data);
+                if (!isBackground) log('Render complete');
+            } catch (e) {
+                log('Error loading data: ' + e.message);
+                console.error(e);
+                if (!isBackground) {
+                    container.innerHTML = `<div style="color:red">加载失败: ${e.message}<br>请检查后端服务器是否启动 (localhost:8889)</div>`;
+                }
+            }
+        }
+
+        function renderData(data) {
+            const container = document.getElementById('content');
+
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div class="empty">暂无提醒数据</div>';
+                return;
+            }
+
+            try {
+                const html = data.map((item, index) => {
+                    const date = new Date(item.bucket_time).toLocaleString('zh-CN', {
+                        month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+                    });
+                    
+                    return `
+                        <div class="card">
+                            <div class="card-info">
+                                <div class="symbol">${item.symbol}</div>
+                                <div class="meta">
+                                    <span><span class="ratio-badge">x${Number(item.breakout_ratio).toFixed(1)}</span> 放量</span>
+                                    <span>🕒 ${date}</span>
+                                    <span>📊 量: ${(Number(item.volume)/1000).toFixed(1)}k</span>
+                                    <span>📉 基线: ${(Number(item.baseline_volume)/1000).toFixed(1)}k</span>
+                                </div>
+                            </div>
+                            <div class="chart-container">
+                                <canvas class="hill-chart" data-index="${index}" width="300" height="80"></canvas>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                container.innerHTML = html;
+                
+                // Initialize Intersection Observer for lazy drawing
+                initObserver(data);
+
+            } catch (renderError) {
+                log(`Render error: ${renderError.message}`);
+                throw renderError;
+            }
+        }
+
+        function initObserver(data) {
+            const observer = new IntersectionObserver((entries, obs) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const canvas = entry.target;
+                        const index = canvas.dataset.index;
+                        const item = data[index];
+                        if (item) {
+                            drawChart(canvas, item);
+                        }
+                        obs.unobserve(canvas); // Only draw once
+                    }
+                });
+            }, { rootMargin: '100px' });
+
+            document.querySelectorAll('canvas.hill-chart').forEach(canvas => {
+                observer.observe(canvas);
+            });
+        }
+
+        function drawChart(canvas, item) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const hillData = item.hill_data || [];
+            
+            if (hillData.length === 0) return;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, width, height);
+
+            const maxVol = Math.max(...hillData.map(d => Number(d.v) || 0));
+            if (maxVol === 0) return;
+
+            const barWidth = width / hillData.length;
+            const currentVol = Number(item.volume);
+
+            hillData.forEach((d, i) => {
+                const val = Number(d.v) || 0;
+                const barHeight = (val / maxVol) * height;
+                const x = i * barWidth;
+                const y = height - barHeight;
+
+                // Check if this bar corresponds to the alert volume
+                // (using loose equality or small epsilon)
+                const isPeak = Math.abs(val - currentVol) < 0.001 || val === currentVol;
+
+                ctx.fillStyle = isPeak ? '#ff5722' : '#007acc';
+                ctx.fillRect(x, y, Math.max(0.8, barWidth - 0.5), barHeight);
+            });
+        }
+
+        // 初始加载
+        loadData();
+
+        // 自动刷新 (10秒)
+        setInterval(() => loadData(true), 10000);
+    </script>
+</body>
+</html>

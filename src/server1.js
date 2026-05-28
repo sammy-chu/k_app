@@ -699,8 +699,7 @@ const intradayAvgVolCache = new Map();
 async function refreshIntradayAvgVolCache() {
   const nowBeijing = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
   const beijingMins = nowBeijing.getHours() * 60 + nowBeijing.getMinutes();
-  // 08:00 前或 17:00 后不写入，避免收盘后产生大量重复记录
-  if (beijingMins < 8 * 60 || beijingMins >= 17 * 60) return;
+  if (beijingMins < 8 * 60) return;
 
   const timeStr = nowBeijing.toTimeString().slice(0, 8); // 'HH:MM:SS'
 
@@ -744,8 +743,7 @@ async function refreshIntradayAvgVolCache() {
 async function writeIntradayVolMinute() {
   const nowBeijing = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
   const beijingMins = nowBeijing.getHours() * 60 + nowBeijing.getMinutes();
-  // 08:00 前或 17:00 后不写入，避免收盘后产生大量重复记录
-  if (beijingMins < 8 * 60 || beijingMins >= 17 * 60) return;
+  if (beijingMins < 8 * 60) return;
 
   const client = await pool.connect();
   try {

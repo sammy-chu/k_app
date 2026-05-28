@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>大单监控筛选</title>
+    <style>
+        body { font-family: sans-serif; background: #1a1a1a; color: #ddd; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 10px; border: 1px solid #444; text-align: left; transition: background-color 0.5s ease; }
+        th { background: #333; }
+        .flash-up { background-color: rgba(38, 166, 154, 0.4) !important; }
+        .flash-down { background-color: rgba(239, 83, 80, 0.4) !important; }
+        .flash-new { background-color: rgba(255, 255, 255, 0.2) !important; }
+        
+        /* 嵌套表格样式 */
+        .parent-row { cursor: pointer; }
+        .parent-row:hover { background-color: #2a2a2a; }
+        .toggle-icon { display: inline-block; width: 20px; text-align: center; font-weight: bold; color: #888; }
+        .child-row { display: none; background-color: #111; }
+        .child-table { margin: 10px 0; border: 1px solid #555; background-color: #222; }
+        .child-table th { background-color: #2a2a2a; font-size: 0.9em; padding: 5px 10px; }
+        .child-table td { padding: 5px 10px; font-size: 0.9em; border-color: #333; }
+        .net-positive { color: #26a69a; font-weight: bold; }
+        .net-negative { color: #ef5350; font-weight: bold; }
+        .net-neutral { color: #888; }
+
+        /* 高频异动样式：1分钟内多次刷出 */
+        .hot-stock-row {
+            background-color: rgba(255, 152, 0, 0.15) !important;
+            border-left: 4px solid #ff9800 !important;
+        }
+        .hot-stock-symbol {
+            color: #ffeb3b !important;
+            text-shadow: 0 0 5px rgba(255, 235, 59, 0.4);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>大单监控筛选 (大单表 + 今日量价)</h2>
+        <div class="nav-links">
+            <a href="/alerts">价格提醒</a>
+            <a href="/volume-alerts">放量提醒</a>
+            <a href="/hills">山丘形态</a>
+            <a href="/hill-alerts">山丘放量</a>
+            <a href="/ranking">涨跌排名</a>
+            <a href="/l2-alerts">L2大单</a>
+        
+            <a href="/screener">选股器</a>
+        </div>
+        <div style="margin-bottom: 15px; background: #2a2a2a; padding: 15px; border-radius: 5px;">
+            <div style="margin-bottom: 10px;">
+                <label>最小挂单量: <input type="number" id="min-order-vol" value="1000"></label>
+                <label style="margin-left:15px;">日总成交量: 
+                    <input type="number" id="min-total-vol" placeholder="最小" style="width: 80px;"> 
+                    - 
+                    <input type="number" id="max-total-vol" placeholder="最大" style="width: 80px;">
+                    <span style="font-size: 0.9em; color: #888;">(前端过滤)</span>
+                </label>
+                <label style="margin-left:15px;">监控时间窗口(分钟): <input type="number" id="time-window" value="60"></label>
+                <label style="margin-left:15px;">方向: 
+                    <select id="side-filter">
+                        <option value="all">全部</option>
+                        <option value="bid">只看买盘</option>
+                        <option value="ask">只看卖盘</option>
+                    </select>
+                    <span style="font-size: 0.9em; color: #888;">(前端过滤)</span>
+                </label>
+            </div>
+            <div>
+                <label>最新价: 
+                    <input type="number" id="min-price" placeholder="最低价" style="width: 80px;"> 
+                    - 
+                    <input type="number" id="max-price" placeholder="最高价" style="width: 80px;">
+                </label>
+                <span style="font-size: 0.9em; color: #888; margin-left: 10px;">(前端过滤)</span>
+            </div>
+            <div style="margin-bottom: 5px; border-top: 1px solid #444; padding-top: 10px;">
+                <label>排序方式: 
+                    <select id="sort-method">
+                        <option value="time">按异动时间降序</option>
+                        <option value="symbol">按股票代码 A-Z</option>
+                    </select>
+                </label>
+                <label style="margin-left:15px;">显示数量: 
+                    <select id="display-limit">
+                        <option value="10">10只</option>
+                        <option value="20" selected>20只</option>
+                        <option value="50">50只</option>
+                        <option value="100">100只</option>
+                        <option value="all">显示全部</option>
+                    </select>
+                </label>
+                <button id="btn-expand-all" style="margin-left:15px; padding: 3px 10px; cursor: pointer;">展开全部</button>
+                <button id="btn-collapse-all" style="margin-left:5px; padding: 3px 10px; cursor: pointer;">收起全部</button>
+            </div>
+        </div>
+        <table>
+            <thead>
+                <tr>
+                    <th>股票代码</th>
+                    <th>最新价</th>
+                    <th>日总成交量</th>
+                    <th>买盘大单总量</th>
+                    <th>卖盘大单总量</th>
+                    <th>净大单差额</th>
+                </tr>
+            </thead>
+            <tbody id="table-body">
+                <tr><td colspan="6">加载中...</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <script>
+        let fetchTimer;
+        let displayedStocks = []; // 前端状态队列，保存已渲染的 symbol
+        let expandedSymbols = new Set(); // 记录展开状态的 symbol
+        
+        function toggleDetails(symbol) {
+            const childRow = document.getElementById('child-row-' + symbol);
+            const icon = document.getElementById('toggle-icon-' + symbol);
+            if (childRow.style.display === 'table-row') {
+                childRow.style.display = 'none';
+                icon.innerText = '[+]';
+                expandedSymbols.delete(symbol);
+            } else {
+                childRow.style.display = 'table-row';
+                icon.innerText = '[-]';
+                expandedSymbols.add(symbol);
+            }
+        }
+        
+        function buildUrl() {
+            const minOrderVol = document.getElementById('min-order-vol').value || 0;
+            const timeWindow = document.getElementById('time-window').value || 5;
+            return `/api/large-orders-screener?min_order_volume=${minOrderVol}&time_window_mins=${timeWindow}`;
+        }
+
+        async function fetchData() {
+            try {
+                const res = await fetch(buildUrl());
+                if (!res.ok) throw new Error('Network response error');
+                let data = await res.json();
+                
+                // --- 前端过滤：买卖方向 ---
+                const side = document.getElementById('side-filter').value;
+                if (side !== 'all') {
+                    data = data.filter(row => row.side === side);
+                }
+
+                // --- 前端过滤：日总成交量 ---
+                const minTotalVolStr = document.getElementById('min-total-vol').value;
+                const maxTotalVolStr = document.getElementById('max-total-vol').value;
+                
+                if (minTotalVolStr !== '' || maxTotalVolStr !== '') {
+                    const minTotalVol = minTotalVolStr !== '' ? Number(minTotalVolStr) : 0;
+                    const maxTotalVol = maxTotalVolStr !== '' ? Number(maxTotalVolStr) : Infinity;
+                    
+                    data = data.filter(row => {
+                        const vol = Number(row.total_volume) || 0;
+                        return vol >= minTotalVol && vol <= maxTotalVol;
+                    });
+                }
+
+                // --- 前端过滤：最新价区间 ---
+                const minPriceStr = document.getElementById('min-price').value;
+                const maxPriceStr = document.getElementById('max-price').value;
+                
+                if (minPriceStr !== '' || maxPriceStr !== '') {
+                    const minPrice = minPriceStr !== '' ? Number(minPriceStr) : -Infinity;
+                    const maxPrice = maxPriceStr !== '' ? Number(maxPriceStr) : Infinity;
+                    
+                    data = data.filter(row => {
+                        const currentPrice = Number(row.current_price);
+                        return currentPrice >= minPrice && currentPrice <= maxPrice;
+                    });
+                }
+                
+                renderTable(data);
+            } catch (err) {
+                console.error('Fetch error:', err);
+                document.getElementById('table-body').innerHTML = `<tr><td colspan="6" style="color:red;">加载失败: ${err.message}</td></tr>`;
+            }
+        }
+
+        function processData(rawData) {
+            const groups = {};
+            const now = new Date();
+            const oneMinAgo = new Date(now.getTime() - 60 * 1000);
+            
+            rawData.forEach(row => {
+                const sym = row.symbol;
+                if (!groups[sym]) {
+                    groups[sym] = {
+                        symbol: sym,
+                        current_price: Number(row.current_price) || 0,
+                        total_volume: Number(row.total_volume) || 0,
+                        latest_detected_at: row.detected_at,
+                        bid_vol: 0,
+                        ask_vol: 0,
+                        orders: [],
+                        recentCount: 0 // 1分钟内频次
+                    };
+                }
+                
+                // 统计1分钟内频次
+                if (new Date(row.detected_at) >= oneMinAgo) {
+                    groups[sym].recentCount++;
+                }
+
+                // 更新最新异动时间
+                if (new Date(row.detected_at) > new Date(groups[sym].latest_detected_at)) {
+                    groups[sym].latest_detected_at = row.detected_at;
+                }
+                
+                const vol = Number(row.order_volume) || 0;
+                if (row.side === 'bid') groups[sym].bid_vol += vol;
+                if (row.side === 'ask') groups[sym].ask_vol += vol;
+                
+                groups[sym].orders.push(row);
+            });
+            
+            // 计算净量并排序（按最新异动时间降序）
+            const result = Object.values(groups).map(g => {
+                g.net_vol = g.bid_vol - g.ask_vol;
+                g.isHot = g.recentCount > 1; // 1分钟内出现超过1次即为热点
+                // 对子订单按时间降序
+                g.orders.sort((a, b) => new Date(b.detected_at) - new Date(a.detected_at));
+                return g;
+            });
+            
+            const sortMethod = document.getElementById('sort-method').value;
+            if (sortMethod === 'time') {
+                result.sort((a, b) => new Date(b.latest_detected_at) - new Date(a.latest_detected_at));
+            } else if (sortMethod === 'symbol') {
+                result.sort((a, b) => a.symbol.localeCompare(b.symbol));
+            }
+            
+            return result;
+        }
+
+        function renderTable(rawData) {
+            const data = processData(rawData);
+            const tbody = document.getElementById('table-body');
+            
+            // 处理清空数据的情况
+            if (data.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">暂无符合条件的大单数据</td></tr>';
+                displayedStocks = [];
+                return;
+            } else if (tbody.querySelector('td[colspan="6"]') && tbody.querySelector('td[colspan="6"]').innerText.includes('暂无')) {
+                tbody.innerHTML = ''; // 清除"暂无数据"提示
+            } else if (tbody.querySelector('td[colspan="6"]') && tbody.querySelector('td[colspan="6"]').innerText.includes('加载中')) {
+                tbody.innerHTML = ''; // 清除"加载中"提示
+            }
+
+            const currentSymbols = new Set();
+            const displayLimitValue = document.getElementById('display-limit').value;
+            const displayLimit = displayLimitValue === 'all' ? data.length : (Number(displayLimitValue) || 20);
+
+            // 正向遍历聚合后的数据，由于已经排序，可以直接按顺序操作 DOM
+            data.slice(0, displayLimit).forEach((group, index) => {
+                const sym = group.symbol;
+                currentSymbols.add(sym);
+                
+                const netClass = group.net_vol > 0 ? 'net-positive' : (group.net_vol < 0 ? 'net-negative' : 'net-neutral');
+                const netPrefix = group.net_vol > 0 ? '+' : '';
+                const hotClass = group.isHot ? 'hot-stock-row' : '';
+                const symbolHotClass = group.isHot ? 'hot-stock-symbol' : '';
+                
+                let parentTr = document.getElementById('parent-row-' + sym);
+                let childTr = document.getElementById('child-row-' + sym);
+                
+                // 子表格 HTML
+                let childTableHtml = `<table class="child-table">
+                    <thead><tr><th>方向</th><th>档位</th><th>挂单价</th><th>挂单量</th><th>发现时间</th></tr></thead><tbody>`;
+                group.orders.forEach(o => {
+                    const sideColor = o.side === 'bid' ? '#26a69a' : '#ef5350';
+                    const sideText = o.side === 'bid' ? '买盘' : '卖盘';
+                    const timeStr = new Date(o.detected_at).toLocaleTimeString();
+                    childTableHtml += `<tr>
+                        <td style="color:${sideColor};">${sideText}</td>
+                        <td>L${o.level}</td>
+                        <td>${Number(o.order_price).toFixed(2)}</td>
+                        <td>${o.order_volume}</td>
+                        <td style="color:#888;">${timeStr}</td>
+                    </tr>`;
+                });
+                childTableHtml += `</tbody></table>`;
+
+                if (parentTr) {
+                    // 已存在，擦写式更新
+                    parentTr.className = 'parent-row ' + hotClass;
+                    const symSpan = parentTr.querySelector('.sym-text');
+                    if (symSpan) symSpan.className = 'sym-text ' + symbolHotClass;
+                    
+                    const existingPrice = Number(parentTr.dataset.price);
+                    const newPrice = group.current_price;
+                    
+                    if (existingPrice !== newPrice) {
+                        const priceTd = parentTr.querySelector('.td-price');
+                        priceTd.innerText = newPrice.toFixed(2);
+                        const flashClass = newPrice > existingPrice ? 'flash-up' : 'flash-down';
+                        priceTd.classList.add(flashClass);
+                        setTimeout(() => priceTd.classList.remove(flashClass), 500);
+                        parentTr.dataset.price = newPrice;
+                    }
+                    
+                    parentTr.querySelector('.td-vol').innerText = group.total_volume;
+                    parentTr.querySelector('.td-bid').innerText = group.bid_vol;
+                    parentTr.querySelector('.td-ask').innerText = group.ask_vol;
+                    
+                    const netTd = parentTr.querySelector('.td-net');
+                    netTd.className = `td-net ${netClass}`;
+                    netTd.innerText = netPrefix + group.net_vol;
+
+                    // 更新子表内容
+                    childTr.querySelector('td').innerHTML = childTableHtml;
+                    
+                    // 调整 DOM 顺序（确保最新的异动能顶上去）
+                    const targetRowIndex = index * 2; // parent + child 占两行
+                    if (Array.from(tbody.children).indexOf(parentTr) !== targetRowIndex) {
+                        tbody.insertBefore(parentTr, tbody.children[targetRowIndex] || null);
+                        tbody.insertBefore(childTr, tbody.children[targetRowIndex + 1] || null);
+                    }
+                    
+                } else {
+                    // 新数据，插入
+                    parentTr = document.createElement('tr');
+                    parentTr.id = 'parent-row-' + sym;
+                    parentTr.className = 'parent-row ' + hotClass;
+                    parentTr.dataset.price = group.current_price;
+                    parentTr.onclick = () => toggleDetails(sym);
+                    
+                    const icon = expandedSymbols.has(sym) ? '[-]' : '[+]';
+                    
+                    parentTr.innerHTML = `
+                        <td style="font-weight:bold;">
+                            <span class="toggle-icon" id="toggle-icon-${sym}">${icon}</span> 
+                            <span class="sym-text ${symbolHotClass}">${sym}</span>
+                        </td>
+                        <td class="td-price">${group.current_price.toFixed(2)}</td>
+                        <td class="td-vol">${group.total_volume}</td>
+                        <td class="td-bid" style="color:#26a69a;">${group.bid_vol}</td>
+                        <td class="td-ask" style="color:#ef5350;">${group.ask_vol}</td>
+                        <td class="td-net ${netClass}">${netPrefix}${group.net_vol}</td>
+                    `;
+                    
+                    childTr = document.createElement('tr');
+                    childTr.id = 'child-row-' + sym;
+                    childTr.className = 'child-row';
+                    childTr.style.display = expandedSymbols.has(sym) ? 'table-row' : 'none';
+                    childTr.innerHTML = `<td colspan="6">${childTableHtml}</td>`;
+                    
+                    parentTr.classList.add('flash-new');
+                    setTimeout(() => parentTr.classList.remove('flash-new'), 500);
+                    
+                    // 插入到指定位置
+                    const targetRowIndex = index * 2;
+                    if (tbody.children[targetRowIndex]) {
+                        tbody.insertBefore(parentTr, tbody.children[targetRowIndex]);
+                        tbody.insertBefore(childTr, tbody.children[targetRowIndex + 1]);
+                    } else {
+                        tbody.appendChild(parentTr);
+                        tbody.appendChild(childTr);
+                    }
+                }
+            });
+
+            // 清理已经跌出前 20 或者不再满足过滤条件的 DOM
+            displayedStocks.forEach(sym => {
+                if (!currentSymbols.has(sym)) {
+                    const p = document.getElementById('parent-row-' + sym);
+                    const c = document.getElementById('child-row-' + sym);
+                    if (p) p.remove();
+                    if (c) c.remove();
+                }
+            });
+            
+            displayedStocks = Array.from(currentSymbols);
+        }
+
+        // 绑定事件
+        ['min-order-vol', 'min-total-vol', 'max-total-vol', 'time-window', 'side-filter', 'min-price', 'max-price', 'sort-method', 'display-limit'].forEach(id => {
+            document.getElementById(id).addEventListener('change', () => {
+                fetchData();
+                // 重置定时器
+                clearInterval(fetchTimer);
+                fetchTimer = setInterval(fetchData, 1000);
+            });
+        });
+
+        // 展开全部
+        document.getElementById('btn-expand-all').addEventListener('click', () => {
+            displayedStocks.forEach(sym => {
+                expandedSymbols.add(sym);
+                const childRow = document.getElementById('child-row-' + sym);
+                const icon = document.getElementById('toggle-icon-' + sym);
+                if (childRow) childRow.style.display = 'table-row';
+                if (icon) icon.innerText = '[-]';
+            });
+        });
+
+        // 收起全部
+        document.getElementById('btn-collapse-all').addEventListener('click', () => {
+            displayedStocks.forEach(sym => {
+                expandedSymbols.delete(sym);
+                const childRow = document.getElementById('child-row-' + sym);
+                const icon = document.getElementById('toggle-icon-' + sym);
+                if (childRow) childRow.style.display = 'none';
+                if (icon) icon.innerText = '[+]';
+            });
+        });
+
+        // 初始加载与自动刷新
+        fetchData();
+        fetchTimer = setInterval(fetchData, 1000); // 每 1 秒刷新一次
+    </script>
+</body>
+</html>

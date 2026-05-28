@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>大单监控 · 嵌套表格</title>
+<style>
+  :root {
+    --bg: #08090c;
+    --surface: #0f1117;
+    --surface2: #161920;
+    --surface3: #1c1f28;
+    --border: rgba(255,255,255,0.05);
+    --border2: rgba(255,255,255,0.1);
+    --text: #c8d4e0;
+    --muted: #485868;
+    --muted2: #6a7a8a;
+    --buy: #ff4d4d;
+    --sell: #22c55e;
+    --accent: #3d7eff;
+    --gold: #f59e0b;
+    --purple: #a78bfa;
+    --font: 'SF Mono', 'Cascadia Code', 'Fira Code', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font); font-size: 12px; min-height: 100vh; }
+
+  /* ── 顶部栏 ── */
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border2);
+    position: sticky; top: 0; z-index: 200;
+  }
+  .logo { font-size: 13px; font-weight: 700; color: var(--accent); letter-spacing: 2px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--sell); animation: pulse 1.4s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.3;transform:scale(0.8)} }
+  .stat-row { display: flex; gap: 16px; }
+  .stat { font-size: 11px; color: var(--muted2); }
+  .stat b { font-weight: 600; }
+  .stat .buy { color: var(--buy); }
+  .stat .sell { color: var(--sell); }
+  .controls { display: flex; gap: 6px; align-items: center; }
+  select, button {
+    background: var(--surface2); color: var(--text);
+    border: 1px solid var(--border2); border-radius: 4px;
+    padding: 4px 8px; font-size: 11px; font-family: var(--font); cursor: pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  .btn-expand-all { color: var(--purple); border-color: rgba(167,139,250,0.3); }
+
+  /* ── 工具栏 ── */
+  .toolbar {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .sort-group { display: flex; gap: 4px; }
+  .sort-btn {
+    font-size: 11px; padding: 3px 10px;
+    border: 1px solid var(--border2); border-radius: 3px;
+    background: transparent; color: var(--muted2); cursor: pointer;
+    transition: all 0.15s;
+  }
+  .sort-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .sep { width: 1px; height: 16px; background: var(--border2); margin: 0 4px; }
+  .filter-btn { font-size: 11px; padding: 3px 8px; border-radius: 3px; border: 1px solid var(--border2); background: transparent; color: var(--muted2); cursor: pointer; }
+  .filter-btn.active-buy { background: rgba(255,77,77,0.15); color: var(--buy); border-color: rgba(255,77,77,0.4); }
+  .filter-btn.active-sell { background: rgba(34,197,94,0.15); color: var(--sell); border-color: rgba(34,197,94,0.4); }
+
+  /* ── 主表格 ── */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    padding: 8px 12px; text-align: right;
+    color: var(--muted); font-size: 10px; letter-spacing: 0.8px; font-weight: 500;
+    border-bottom: 1px solid var(--border2);
+    background: var(--surface); position: sticky; top: 45px; z-index: 100;
+    white-space: nowrap;
+  }
+  thead th:first-child { text-align: left; width: 180px; }
+  thead th:nth-child(2) { text-align: center; }
+
+  /* 父行 */
+  .parent-row {
+    cursor: pointer;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  .parent-row:hover { background: var(--surface2); }
+  .parent-row td { padding: 10px 12px; text-align: right; vertical-align: middle; }
+  .parent-row td:first-child { text-align: left; }
+  .parent-row td:nth-child(2) { text-align: center; }
+
+  .parent-row.flash-buy { animation: pFlashBuy 0.8s ease-out; }
+  .parent-row.flash-sell { animation: pFlashSell 0.8s ease-out; }
+  @keyframes pFlashBuy { 0%{background:rgba(255,77,77,0.12)} 100%{background:transparent} }
+  @keyframes pFlashSell { 0%{background:rgba(34,197,94,0.12)} 100%{background:transparent} }
+
+  .toggle-icon { display: inline-block; width: 16px; height: 16px; line-height: 16px; text-align: center; border-radius: 3px; border: 1px solid var(--border2); color: var(--muted2); font-size: 10px; margin-right: 8px; transition: transform 0.2s, background 0.15s; }
+  .toggle-icon.open { background: var(--accent); border-color: var(--accent); color: #fff; transform: rotate(90deg); }
+  .stock-code { font-size: 13px; font-weight: 700; color: #dde5ef; }
+  .stock-name { font-size: 10px; color: var(--muted2); margin-top: 1px; }
+  .price-cell { font-size: 13px; font-weight: 600; }
+  .up { color: var(--buy); }
+  .dn { color: var(--sell); }
+  .neu { color: var(--text); }
+  .inline-bar {
+    display: flex; align-items: center; gap: 4px; justify-content: flex-end;
+  }
+  .mini-bar-wrap { width: 50px; height: 4px; background: var(--surface3); border-radius: 2px; overflow: hidden; }
+  .mini-bar-fill { height: 100%; border-radius: 2px; transition: width 0.4s; }
+  .fill-buy { background: var(--buy); }
+  .fill-sell { background: var(--sell); }
+  .net-pos { color: var(--buy); }
+  .net-neg { color: var(--sell); }
+  .count-badge {
+    display: inline-block; font-size: 10px; padding: 1px 5px;
+    background: var(--surface3); border-radius: 2px; color: var(--muted2);
+  }
+  .last-time { color: var(--muted2); font-size: 11px; }
+
+  /* 子行区域 */
+  .child-section { display: none; }
+  .child-section.open { display: table-row-group; }
+  .child-header-row td {
+    background: var(--surface2); padding: 5px 12px 5px 40px;
+    font-size: 10px; color: var(--muted); letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    text-align: right;
+  }
+  .child-header-row td:first-child { text-align: left; }
+  .child-row td {
+    padding: 6px 12px 6px 40px; text-align: right;
+    background: var(--surface2); border-bottom: 1px solid var(--border);
+    font-size: 11px;
+    animation: childIn 0.3s ease-out;
+  }
+  .child-row td:first-child { text-align: left; }
+  @keyframes childIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }
+  .child-row:hover td { background: var(--surface3); }
+  .dir-tag { font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 2px; }
+  .dir-buy { background: rgba(255,77,77,0.15); color: var(--buy); }
+  .dir-sell { background: rgba(34,197,94,0.15); color: var(--sell); }
+  .level-tag { font-size: 10px; color: var(--muted2); }
+
+  /* 空状态 */
+  .empty-row td { text-align: center; padding: 80px; color: var(--muted); font-size: 13px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">
+    <span class="dot"></span>
+    BIG ORDER · MONITOR
+  </div>
+  <div class="stat-row">
+    <div class="stat">买入 <b class="buy" id="s-buy">0</b> 笔</div>
+    <div class="stat">卖出 <b class="sell" id="s-sell">0</b> 笔</div>
+    <div class="stat">总额 <b id="s-amt">0</b> 万</div>
+    <div class="stat">股票 <b id="s-stocks">0</b> 只</div>
+    <div class="stat">时间 <b id="s-time">--:--</b></div>
+  </div>
+  <div class="controls">
+    <button class="btn-expand-all" id="expandAllBtn">展开全部</button>
+    <select id="maxStocks">
+      <option value="20">限20只</option>
+      <option value="30">限30只</option>
+      <option value="50" selected>限50只</option>
+    </select>
+    <button id="clearBtn">清空</button>
+  </div>
+</div>
+
+<div class="toolbar">
+  <span style="color:var(--muted2);font-size:11px">排序</span>
+  <div class="sort-group">
+    <button class="sort-btn active" data-sort="time">最新异动</button>
+    <button class="sort-btn" data-sort="net">净流入</button>
+    <button class="sort-btn" data-sort="amt">总金额</button>
+    <button class="sort-btn" data-sort="count">大单笔数</button>
+  </div>
+  <div class="sep"></div>
+  <span style="color:var(--muted2);font-size:11px">方向</span>
+  <button class="filter-btn" data-dir="all" style="color:var(--text);border-color:var(--border2);background:var(--surface2)">全部</button>
+  <button class="filter-btn" data-dir="bid">只看买入</button>
+  <button class="filter-btn" data-dir="ask">只看卖出</button>
+</div>
+
+<div class="table-wrap">
+<table id="mainTable">
+  <thead>
+    <tr>
+      <th>股票</th>
+      <th>最新价 / 涨跌</th>
+      <th>买入大单(万)</th>
+      <th>卖出大单(万)</th>
+      <th>净流入(万)</th>
+      <th>力量对比</th>
+      <th>大单笔数</th>
+      <th>最新时间</th>
+    </tr>
+  </thead>
+  <tbody id="tbody">
+    <tr class="empty-row"><td colspan="8">等待大单数据推送...</td></tr>
+  </tbody>
+</table>
+</div>
+
+<script>
+const API_URL = '/api/large-orders-screener';
+const POLL_MS = 2000;
+const MAX_CHILD = 8;
+
+let stockMap = {};
+let sortMode = 'time';
+let filterDir = 'all';
+let allExpanded = false;
+let totalBuy=0, totalSell=0, totalAmt=0;
+let expandState = {};  // { sym -> bool }
+
+function aggregateOrders(orders) {
+  orders.forEach(o => {
+    const sym = o.symbol;
+    const dir = o.side;
+    const price = parseFloat(o.price);
+    const vol = parseFloat(o.volume || o.qty || 0);
+    const amt = price * vol;
+    const ts = o.timestamp ? new Date(o.timestamp).getTime() : Date.now();
+    const timeStr = o.time || new Date(ts).toTimeString().slice(0,8);
+    const level = o.level || o.order_level || '';
+
+    if (!stockMap[sym]) {
+      stockMap[sym] = {
+        symbol: sym, name: o.name || sym,
+        price, prev_close: o.prev_close || price,
+        bid_amt: 0, ask_amt: 0, bid_count: 0, ask_count: 0,
+        orders: [], lastTs: ts, lastDir: dir, isNew: true
+      };
+    }
+    const g = stockMap[sym];
+    const oldPrice = g.price;
+    g.price = price;
+    g.lastTs = Math.max(g.lastTs, ts);
+    g.lastDir = dir;
+    g.isNew = true;
+    if (dir === 'bid') { g.bid_amt += amt; g.bid_count++; totalBuy++; }
+    else { g.ask_amt += amt; g.ask_count++; totalSell++; }
+    totalAmt += amt;
+    g.orders.unshift({ dir, price, vol, amt, time: timeStr, ts, level });
+    if (g.orders.length > MAX_CHILD) g.orders.pop();
+  });
+}
+
+function getSorted() {
+  const max = parseInt(document.getElementById('maxStocks').value);
+  return Object.values(stockMap).sort((a, b) => {
+    if (sortMode === 'time') return b.lastTs - a.lastTs;
+    if (sortMode === 'net') return (b.bid_amt-b.ask_amt) - (a.bid_amt-a.ask_amt);
+    if (sortMode === 'count') return (b.bid_count+b.ask_count) - (a.bid_count+a.ask_count);
+    return (b.bid_amt+b.ask_amt) - (a.bid_amt+a.ask_amt);
+  }).slice(0, max);
+}
+
+function fmtW(n) { return (n/10000).toFixed(1); }
+function fmtTime() { return new Date().toTimeString().slice(0,8); }
+
+function renderAll() {
+  const tbody = document.getElementById('tbody');
+  const stocks = getSorted();
+
+  document.getElementById('s-buy').textContent = totalBuy;
+  document.getElementById('s-sell').textContent = totalSell;
+  document.getElementById('s-amt').textContent = fmtW(totalAmt);
+  document.getElementById('s-stocks').textContent = Object.keys(stockMap).length;
+  document.getElementById('s-time').textContent = fmtTime();
+
+  if (stocks.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="8">等待大单数据推送...</td></tr>';
+    return;
+  }
+
+  // 收集现有行
+  const existing = {};
+  tbody.querySelectorAll('tr.parent-row[data-sym]').forEach(tr => existing[tr.dataset.sym] = tr);
+
+  // 移除不在列表中的
+  const symSet = new Set(stocks.map(s=>s.symbol));
+  Object.entries(existing).forEach(([sym, tr]) => {
+    if (!symSet.has(sym)) {
+      const sec = document.getElementById('child-'+sym);
+      if (sec) sec.remove();
+      tr.remove();
+    }
+  });
+
+  stocks.forEach((s, i) => {
+    const chg = s.prev_close ? ((s.price-s.prev_close)/s.prev_close*100) : 0;
+    const chgStr = (chg>=0?'+':'')+chg.toFixed(2)+'%';
+    const chgCls = chg>0?'up':chg<0?'dn':'neu';
+    const net = s.bid_amt - s.ask_amt;
+    const netStr = (net>=0?'+':'')+fmtW(net);
+    const netCls = net>=0?'net-pos':'net-neg';
+    const sum = s.bid_amt + s.ask_amt || 1;
+    const bidPct = Math.round(s.bid_amt/sum*100);
+    const totalCount = s.bid_count + s.ask_count;
+    const expanded = expandState[s.symbol] !== undefined ? expandState[s.symbol] : false;
+
+    // 子行 HTML
+    let childRows = '';
+    const filteredOrders = filterDir==='all' ? s.orders : s.orders.filter(o=>o.dir===(filterDir==='bid'?'bid':'ask'));
+    filteredOrders.forEach(o => {
+      const lvl = o.level ? `<span class="level-tag">L${o.level}</span> ` : '';
+      childRows += `<tr class="child-row">
+        <td><span class="dir-tag ${o.dir==='bid'?'dir-buy':'dir-sell'}">${o.dir==='bid'?'▲ 买入':'▽ 卖出'}</span></td>
+        <td>${o.price.toFixed(2)}</td>
+        <td>${(o.vol/100).toFixed(0)} 手</td>
+        <td>${fmtW(o.amt)} 万</td>
+        <td>-</td>
+        <td>-</td>
+        <td>${lvl}${o.dir==='bid'?'<span class="count-badge">买单</span>':'<span class="count-badge">卖单</span>'}</td>
+        <td class="last-time">${o.time}</td>
+      </tr>`;
+    });
+
+    const insertIdx = i * 2; // 父行+子section交替
+
+    if (existing[s.symbol]) {
+      const pRow = existing[s.symbol];
+      // 更新父行各单元格
+      pRow.querySelector('.price-cell').innerHTML = `${s.price.toFixed(2)} <span class="${chgCls}" style="font-size:11px">${chgStr}</span>`;
+      pRow.querySelector('.bid-amt').textContent = fmtW(s.bid_amt);
+      pRow.querySelector('.ask-amt').textContent = fmtW(s.ask_amt);
+      pRow.querySelector('.net-val').textContent = netStr;
+      pRow.querySelector('.net-val').className = 'net-val ' + netCls;
+      pRow.querySelector('.mini-bar-fill.fill-buy').style.width = bidPct+'%';
+      pRow.querySelector('.count-val').textContent = totalCount;
+      pRow.querySelector('.last-time').textContent = new Date(s.lastTs).toTimeString().slice(0,8);
+
+      if (s.isNew) {
+        const fc = s.lastDir==='bid'?'flash-buy':'flash-sell';
+        pRow.classList.remove('flash-buy','flash-sell');
+        void pRow.offsetWidth;
+        pRow.classList.add(fc);
+        s.isNew = false;
+      }
+
+      // 更新子行内容
+      const sec = document.getElementById('child-'+s.symbol);
+      if (sec) {
+        sec.innerHTML = `<tr class="child-header-row"><td>方向</td><td>挂单价</td><td>手数</td><td>金额(万)</td><td>净流入</td><td>力量</td><td>标识</td><td>时间</td></tr>${childRows}`;
+        if (expanded) sec.classList.add('open');
+      }
+
+      // 调整顺序
+      const refNode = tbody.children[i*2] || null;
+      if (pRow !== refNode) tbody.insertBefore(pRow, refNode);
+      const sec2 = document.getElementById('child-'+s.symbol);
+      if (sec2) {
+        const afterParent = pRow.nextSibling;
+        if (sec2 !== afterParent) tbody.insertBefore(sec2, pRow.nextSibling);
+      }
+    } else {
+      // 新建父行
+      const pRow = document.createElement('tr');
+      pRow.className = 'parent-row';
+      pRow.dataset.sym = s.symbol;
+      pRow.innerHTML = `
+        <td>
+          <span class="toggle-icon ${expanded?'open':''}">▶</span>
+          <div style="display:inline-block">
+            <div class="stock-code">${s.symbol}</div>
+            <div class="stock-name">${s.name}</div>
+          </div>
+        </td>
+        <td class="price-cell">${s.price.toFixed(2)} <span class="${chgCls}" style="font-size:11px">${chgStr}</span></td>
+        <td class="up bid-amt">${fmtW(s.bid_amt)}</td>
+        <td class="dn ask-amt">${fmtW(s.ask_amt)}</td>
+        <td class="net-val ${netCls}">${netStr}</td>
+        <td>
+          <div class="inline-bar">
+            <div class="mini-bar-wrap"><div class="mini-bar-fill fill-buy" style="width:${bidPct}%"></div></div>
+            <div class="mini-bar-wrap"><div class="mini-bar-fill fill-sell" style="width:${100-bidPct}%"></div></div>
+          </div>
+        </td>
+        <td><span class="count-val count-badge">${totalCount}</span></td>
+        <td class="last-time">${new Date(s.lastTs).toTimeString().slice(0,8)}</td>
+      `;
+      pRow.addEventListener('click', () => toggleExpand(s.symbol));
+
+      // 子行区域
+      const sec = document.createElement('tbody');
+      sec.id = 'child-'+s.symbol;
+      sec.className = 'child-section' + (expanded?' open':'');
+      sec.innerHTML = `<tr class="child-header-row"><td>方向</td><td>挂单价</td><td>手数</td><td>金额(万)</td><td>净流入</td><td>力量</td><td>标识</td><td>时间</td></tr>${childRows}`;
+
+      const refNode = tbody.children[i*2] || null;
+      tbody.insertBefore(pRow, refNode);
+      tbody.insertBefore(sec, pRow.nextSibling);
+      s.isNew = false;
+    }
+  });
+}
+
+function toggleExpand(sym) {
+  const sec = document.getElementById('child-'+sym);
+  const pRow = document.querySelector(`tr.parent-row[data-sym="${sym}"]`);
+  const icon = pRow?.querySelector('.toggle-icon');
+  if (!sec) return;
+  const nowOpen = sec.classList.toggle('open');
+  expandState[sym] = nowOpen;
+  icon?.classList.toggle('open', nowOpen);
+}
+
+document.getElementById('expandAllBtn').addEventListener('click', () => {
+  allExpanded = !allExpanded;
+  document.getElementById('expandAllBtn').textContent = allExpanded ? '收起全部' : '展开全部';
+  document.querySelectorAll('.child-section').forEach(sec => {
+    sec.classList.toggle('open', allExpanded);
+    const sym = sec.id.replace('child-','');
+    expandState[sym] = allExpanded;
+  });
+  document.querySelectorAll('.toggle-icon').forEach(ic => ic.classList.toggle('open', allExpanded));
+});
+
+document.querySelectorAll('.sort-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.sort-btn').forEach(x=>x.classList.remove('active'));
+    b.classList.add('active'); sortMode = b.dataset.sort; renderAll();
+  });
+});
+
+document.querySelectorAll('.filter-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(x=>{
+      x.className='filter-btn'; x.style.cssText='';
+    });
+    filterDir = b.dataset.dir;
+    if(filterDir==='bid') b.classList.add('active-buy');
+    else if(filterDir==='ask') b.classList.add('active-sell');
+    else { b.style.color='var(--text)'; b.style.borderColor='var(--border2)'; b.style.background='var(--surface2)'; }
+    renderAll();
+  });
+});
+
+document.getElementById('clearBtn').addEventListener('click', () => {
+  stockMap={}; totalBuy=0; totalSell=0; totalAmt=0; expandState={};
+  document.getElementById('tbody').innerHTML = '<tr class="empty-row"><td colspan="8">等待大单数据推送...</td></tr>';
+});
+document.getElementById('maxStocks').addEventListener('change', renderAll);
+
+/* ── Demo 模拟 ── */
+const DEMO_STOCKS=[
+  {symbol:'600036',name:'招商银行',base:40.2},{symbol:'000858',name:'五粮液',base:158.5},
+  {symbol:'300750',name:'宁德时代',base:220.3},{symbol:'601318',name:'中国平安',base:48.6},
+  {symbol:'000333',name:'美的集团',base:62.4},{symbol:'002475',name:'立讯精密',base:38.9},
+  {symbol:'600900',name:'长江电力',base:25.1},{symbol:'601888',name:'中国中免',base:72.3},
+];
+function simulate() {
+  const s=DEMO_STOCKS[Math.floor(Math.random()*DEMO_STOCKS.length)];
+  const side=Math.random()>0.45?'bid':'ask';
+  const price=parseFloat((s.base*(1+(Math.random()-0.5)*0.01)).toFixed(2));
+  const vol=Math.floor(Math.random()*900+100)*100;
+  aggregateOrders([{symbol:s.symbol,name:s.name,side,price,volume:vol,prev_close:s.base,timestamp:Date.now(),time:new Date().toTimeString().slice(0,8),level:Math.ceil(Math.random()*3)}]);
+}
+
+async function fetchData() {
+  try {
+    const res = await fetch(API_URL);
+    const data = await res.json();
+    const orders = Array.isArray(data)?data:(data.orders||data.data||[]);
+    if(orders.length) aggregateOrders(orders);
+  } catch(e) { simulate(); }
+  renderAll();
+}
+
+setInterval(fetchData, POLL_MS);
+fetchData();
+</script>
+</body>
+</html>

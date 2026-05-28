@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>选股器</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+SC:wght@300;400;500&display=swap');
+
+  :root {
+    --bg:         #0a0c0f;
+    --bg2:        #10141a;
+    --bg3:        #161c24;
+    --bg4:        #1a2130;
+    --border:     #1e2733;
+    --border2:    #263040;
+    --text:       #e8f2fc;
+    --text-dim:   #8fa8c0;
+    --text-mute:  #4a5f72;
+    --up:         #00e676;
+    --down:       #ff4d6a;
+    --accent:     #40a9ff;
+    --accent-dim: #40a9ff15;
+    --gold:       #ffd666;
+    --mono:       'IBM Plex Mono', monospace;
+    --sans:       'IBM Plex Sans SC', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body { height: 100%; }
+
+  body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 16px;
+  }
+
+  .top-fixed { flex-shrink: 0; }
+
+  /* ── header ── */
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 13px 20px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+  }
+  .header-left { display: flex; align-items: center; gap: 14px; }
+  .logo { font-family: var(--mono); font-size: 18px; font-weight: 600; letter-spacing: 0.08em; color: var(--accent); }
+  .logo span { color: var(--text-dim); font-weight: 400; }
+  .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-mute); transition: background 0.3s; }
+  .status-dot.live  { background: var(--up);   box-shadow: 0 0 6px var(--up); }
+  .status-dot.error { background: var(--down); }
+  .last-update { font-family: var(--mono); font-size: 14px; color: var(--text-dim); }
+
+  /* ── filter panel ── */
+  .filter-panel {
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 20px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    align-items: flex-end;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .filter-label { font-size: 12px; font-family: var(--mono); color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; }
+  .filter-row { display: flex; align-items: center; gap: 4px; }
+  .filter-sep { font-family: var(--mono); font-size: 14px; color: var(--text-mute); }
+
+  input[type=number] {
+    background: var(--bg3);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 15px;
+    padding: 6px 9px;
+    border-radius: 3px;
+    width: 96px;
+    outline: none;
+    transition: border-color 0.15s;
+    -moz-appearance: textfield;
+  }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  input[type=number]:focus    { border-color: var(--accent); }
+  input[type=number].has-value { border-color: #40a9ff60; color: var(--accent); }
+  input[type=number]::placeholder { color: var(--text-mute); }
+
+  .filter-actions { display: flex; align-items: flex-end; gap: 8px; margin-left: auto; }
+
+  .btn {
+    background: var(--bg3); border: 1px solid var(--border2); color: var(--text);
+    font-family: var(--mono); font-size: 13px; padding: 7px 16px; border-radius: 3px;
+    cursor: pointer; transition: border-color 0.15s, color 0.15s, background 0.15s; white-space: nowrap;
+  }
+  .btn:hover    { border-color: var(--accent); color: var(--accent); }
+  .btn.primary  { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .btn.ghost    { border-color: transparent; color: var(--text-dim); }
+  .btn.ghost:hover { border-color: var(--border2); color: var(--text); }
+
+  /* logic toggle */
+  .logic-toggle { display: flex; flex-direction: column; gap: 4px; }
+  .logic-label  { font-size: 12px; font-family: var(--mono); color: var(--text-dim); letter-spacing: 0.06em; text-transform: uppercase; }
+  .logic-btns   { display: flex; border: 1px solid var(--border2); border-radius: 3px; overflow: hidden; }
+  .logic-btn {
+    background: var(--bg3); border: none; color: var(--text-dim);
+    font-family: var(--mono); font-size: 13px; font-weight: 500; padding: 6px 16px;
+    cursor: pointer; letter-spacing: 0.06em; transition: background 0.15s, color 0.15s;
+  }
+  .logic-btn + .logic-btn { border-left: 1px solid var(--border2); }
+  .logic-btn:hover { color: var(--text); }
+  .logic-btn.active.and { background: var(--accent-dim); color: var(--accent); }
+  .logic-btn.active.or  { background: #ffd66615; color: var(--gold); }
+
+  /* active tags */
+  .active-tags {
+    display: flex; flex-wrap: wrap; gap: 5px; padding: 6px 20px;
+    background: var(--bg); border-bottom: 1px solid var(--border);
+    min-height: 32px; align-items: center;
+  }
+  .active-tags:empty::before {
+    content: '暂无筛选条件 — 显示全部股票';
+    font-family: var(--mono); font-size: 12px; color: var(--text-mute);
+  }
+  .tag {
+    display: flex; align-items: center; gap: 5px;
+    background: var(--bg4); border: 1px solid var(--border2); border-radius: 3px;
+    padding: 3px 10px; font-family: var(--mono); font-size: 12px; color: var(--accent);
+  }
+  .tag-x { cursor: pointer; color: var(--text-mute); font-size: 15px; line-height: 1; transition: color 0.15s; }
+  .tag-x:hover { color: var(--down); }
+
+  /* ── thead 独立表格（不滚动） ── */
+  .thead-wrap {
+    flex-shrink: 0;
+    overflow: hidden;
+    background: var(--bg2);
+    border-bottom: 2px solid var(--border2);
+  }
+
+  /* count bar */
+  .count-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 12px;
+    background: var(--bg2);
+    border-bottom: 1px solid var(--border);
+    height: 30px;
+    flex-shrink: 0;
+  }
+  .count-badge { font-family: var(--mono); font-size: 13px; color: var(--text-dim); }
+  .count-badge b { color: var(--gold); font-weight: 600; }
+
+  /* ── tbody 唯一滚动区域 ── */
+  .tbody-wrap { flex: 1; overflow: auto; will-change: transform; contain: strict; }
+
+  /* ── 共用表格样式 ── */
+  .tbl {
+    border-collapse: collapse;
+    table-layout: fixed;
+    width: 1060px;
+    min-width: 100%;
+  }
+
+  .tbl col:nth-child(1)  { width: 90px;  }
+  .tbl col:nth-child(2)  { width: 80px;  }
+  .tbl col:nth-child(3)  { width: 80px;  }
+  .tbl col:nth-child(4)  { width: 80px;  }
+  .tbl col:nth-child(5)  { width: 90px;  }
+  .tbl col:nth-child(6)  { width: 90px;  }
+  .tbl col:nth-child(7)  { width: 70px;  }
+  .tbl col:nth-child(8)  { width: 80px;  }
+  .tbl col:nth-child(9)  { width: 80px;  }
+  .tbl col:nth-child(10) { width: 70px;  }
+  .tbl col:nth-child(11) { width: 80px;  }
+  .tbl col:nth-child(12) { width: 80px;  }
+
+  thead th {
+    background: var(--bg2);
+    padding: 9px 12px;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s;
+  }
+  thead th:hover            { color: var(--accent); }
+  thead th.sort-asc::after  { content: ' ↑'; color: var(--accent); }
+  thead th.sort-desc::after { content: ' ↓'; color: var(--accent); }
+  thead th:first-child { text-align: left; }
+
+  tbody tr { border-bottom: 1px solid var(--border); transition: background 0.1s; }
+  tbody tr:hover { background: var(--bg3); }
+
+  td {
+    padding: 9px 12px;
+    text-align: right;
+    font-family: var(--mono);
+    font-size: 15px;
+    white-space: nowrap;
+  }
+  td:first-child { text-align: left; }
+
+  .symbol { font-weight: 600; font-size: 16px; color: #e8f0f8; letter-spacing: 0.03em; }
+  .up   { color: var(--up); }
+  .down { color: var(--down); }
+  .flat { color: var(--text-dim); }
+
+  .vol-ratio-val      { font-weight: 600; color: var(--text-dim); }
+  .vol-ratio-val.high { color: var(--gold); }
+
+  .bar-cell { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+  .mini-bar { width: 36px; height: 3px; background: var(--border2); border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .mini-bar-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+
+  .empty-row td { text-align: center; padding: 70px; color: var(--text-dim); font-size: 15px; }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid var(--border2); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes rowflash { 0% { background: var(--accent-dim); } 100% { background: transparent; } }
+  tr.flash { animation: rowflash 0.8s ease-out; }
+
+  ::-webkit-scrollbar       { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<div class="top-fixed">
+
+  <div class="header">
+    <div class="header-left">
+      <div class="logo">STOCK<span>/SCREENER</span></div>
+      <div class="status-dot" id="statusDot"></div>
+    </div>
+    <div class="last-update" id="lastUpdate">--:--:--</div>
+  </div>
+
+  <div class="filter-panel">
+    <div class="filter-group">
+      <span class="filter-label">价格区间</span>
+      <div class="filter-row">
+        <input type="number" id="priceMin" placeholder="最低" step="1" min="0">
+        <span class="filter-sep">—</span>
+        <input type="number" id="priceMax" placeholder="最高" step="1" min="0">
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">涨跌幅 %</span>
+      <div class="filter-row">
+        <input type="number" id="changeMin" placeholder="-99" step="0.1">
+        <span class="filter-sep">—</span>
+        <input type="number" id="changeMax" placeholder="+99" step="0.1">
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">量比（今日/同期均量）</span>
+      <div class="filter-row">
+        <input type="number" id="volRatioMin" placeholder="最低" step="0.1" min="0">
+        <span class="filter-sep">—</span>
+        <input type="number" id="volRatioMax" placeholder="最高" step="0.1" min="0">
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">最小成交量</span>
+      <div class="filter-row">
+        <input type="number" id="volMin" placeholder="0" step="1000" min="0">
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">价差 ask-bid</span>
+      <div class="filter-row">
+        <input type="number" id="spreadMin" placeholder="最低" step="0.01" min="0">
+        <span class="filter-sep">—</span>
+        <input type="number" id="spreadMax" placeholder="最高" step="0.01" min="0">
+      </div>
+    </div>
+    <div class="filter-actions">
+      <div class="logic-toggle">
+        <span class="logic-label">条件关系</span>
+        <div class="logic-btns">
+          <button class="logic-btn active and" id="btnAnd" onclick="setLogic('and')">AND</button>
+          <button class="logic-btn"            id="btnOr"  onclick="setLogic('or')">OR</button>
+        </div>
+      </div>
+      <button class="btn ghost"   onclick="clearAll()">清空</button>
+      <button class="btn primary" onclick="run()">筛选</button>
+    </div>
+  </div>
+
+  <div class="active-tags" id="activeTags"></div>
+
+  <!-- thead 独立表格，不参与滚动 -->
+  <div class="thead-wrap" id="theadWrap">
+    <table class="tbl">
+      <colgroup><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
+      <thead>
+        <tr>
+          <th onclick="sortBy('symbol')">代码</th>
+          <th onclick="sortBy('last_price')">现价</th>
+          <th onclick="sortBy('change_pct')" class="sort-desc">涨跌%</th>
+          <th onclick="sortBy('change_amount')">涨跌额</th>
+          <th onclick="sortBy('total_volume')">今日量</th>
+          <th onclick="sortBy('avg_vol_10d')">同期均量</th>
+          <th onclick="sortBy('vol_ratio')">量比</th>
+          <th onclick="sortBy('bid')">Bid</th>
+          <th onclick="sortBy('ask')">Ask</th>
+          <th onclick="sortBy('spread')">价差</th>
+          <th onclick="sortBy('high_price')">日高</th>
+          <th onclick="sortBy('low_price')">日低</th>
+        </tr>
+      </thead>
+    </table>
+  </div>
+
+  <div class="count-bar">
+    <span class="count-badge" id="countBadge">—</span>
+  </div>
+
+</div>
+
+<!-- 虚拟滚动容器 -->
+<div class="tbody-wrap" id="tbodyWrap">
+  <div id="vspacer" style="position:relative;">
+    <table class="tbl" id="vtable" style="position:absolute;top:0;left:0;width:100%;">
+      <colgroup><col><col><col><col><col><col><col><col><col><col><col><col></colgroup>
+      <tbody id="tbody">
+        <tr class="empty-row"><td colspan="12"><span class="spinner"></span>加载中...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- 横向滚动同步 -->
+<script>
+  document.getElementById('tbodyWrap').addEventListener('scroll', function() {
+    document.getElementById('theadWrap').scrollLeft = this.scrollLeft;
+    renderVisible();
+  });
+</script>
+
+<script>
+  let allData   = [];
+  let sortKey   = 'change_pct';
+  let sortDir   = -1;
+  let maxVol    = 1;
+  let autoTimer = null;
+  let logic     = 'and';
+  const REFRESH_MS = 10000;
+  let lastParams = {};
+
+  const SORT_COLS = ['symbol','last_price','change_pct','change_amount',
+                     'total_volume','avg_vol_10d','vol_ratio','bid','ask',
+                     'spread','high_price','low_price'];
+
+  // ── logic ──
+  function setLogic(l) {
+    logic = l;
+    document.getElementById('btnAnd').classList.toggle('active', l === 'and');
+    document.getElementById('btnAnd').classList.toggle('and',    l === 'and');
+    document.getElementById('btnOr').classList.toggle('active',  l === 'or');
+    document.getElementById('btnOr').classList.toggle('or',      l === 'or');
+    run();
+  }
+
+  // ── params ──
+  const FIELDS = [
+    ['priceMin','price_min'],['priceMax','price_max'],
+    ['changeMin','change_min'],['changeMax','change_max'],
+    ['volRatioMin','vol_ratio_min'],['volRatioMax','vol_ratio_max'],
+    ['volMin','vol_min'],
+    ['spreadMin','spread_min'],['spreadMax','spread_max'],
+  ];
+  const INPUT_MAP = Object.fromEntries(FIELDS.map(([id, k]) => [id, k]));
+  const TAG_META  = {
+    price_min:    {label:'价格 ≥',  suffix:''},
+    price_max:    {label:'价格 ≤',  suffix:''},
+    change_min:   {label:'涨跌% ≥', suffix:'%'},
+    change_max:   {label:'涨跌% ≤', suffix:'%'},
+    vol_ratio_min:{label:'量比 ≥',  suffix:'x'},
+    vol_ratio_max:{label:'量比 ≤',  suffix:'x'},
+    vol_min:      {label:'成交量 ≥',suffix:''},
+    spread_min:   {label:'价差 ≥',  suffix:''},
+    spread_max:   {label:'价差 ≤',  suffix:''},
+  };
+
+  function getParams() {
+    const p = {};
+    FIELDS.forEach(([id, key]) => {
+      const v = document.getElementById(id).value.trim();
+      if (v !== '') p[key] = v;
+    });
+    p.logic = logic;
+    return p;
+  }
+  function paramsToQuery(p) {
+    return Object.entries(p).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+  }
+  function updateInputHighlights() {
+    FIELDS.forEach(([id]) => {
+      document.getElementById(id).classList.toggle('has-value',
+        document.getElementById(id).value.trim() !== '');
+    });
+  }
+
+  // ── tags ──
+  function renderTags(params) {
+    const c = document.getElementById('activeTags');
+    c.innerHTML = '';
+    const condKeys = Object.keys(params).filter(k => k !== 'logic');
+    if (!condKeys.length) return;
+    const activeGroups = [
+      params.price_min    || params.price_max,
+      params.change_min   || params.change_max,
+      params.vol_ratio_min|| params.vol_ratio_max,
+      params.vol_min,
+      params.spread_min   || params.spread_max,
+    ].filter(Boolean).length;
+    if (activeGroups > 1) {
+      const b = document.createElement('div');
+      b.className = 'tag';
+      b.style.borderColor = logic==='or' ? '#ffd66660' : '#40a9ff60';
+      b.style.color       = logic==='or' ? 'var(--gold)' : 'var(--accent)';
+      b.textContent = logic.toUpperCase();
+      c.appendChild(b);
+    }
+    condKeys.forEach(key => {
+      const meta = TAG_META[key];
+      if (!meta) return;
+      const tag = document.createElement('div');
+      tag.className = 'tag';
+      tag.innerHTML = `${meta.label} <b>${params[key]}${meta.suffix}</b> <span class="tag-x">×</span>`;
+      tag.querySelector('.tag-x').addEventListener('click', () => {
+        const inputId = Object.keys(INPUT_MAP).find(id => INPUT_MAP[id] === key);
+        if (inputId) { document.getElementById(inputId).value = ''; }
+        run();
+      });
+      c.appendChild(tag);
+    });
+  }
+
+  // ── sort ──
+  function sortBy(key) {
+    if (sortKey === key) { sortDir *= -1; } else { sortKey = key; sortDir = -1; }
+    document.querySelectorAll('thead th').forEach((th, i) => {
+      th.classList.remove('sort-asc','sort-desc');
+      if (SORT_COLS[i] === key) th.classList.add(sortDir === -1 ? 'sort-desc' : 'sort-asc');
+    });
+    render();
+  }
+
+  // ── fetch ──
+  async function fetchData(params) {
+    const dot = document.getElementById('statusDot');
+    const qs  = paramsToQuery(params);
+    try {
+      const res = await fetch(`/api/screener${qs ? '?'+qs : ''}`);
+      if (!res.ok) throw new Error(res.status);
+      allData = await res.json();
+      maxVol  = allData.reduce((m,r) => Math.max(m, Number(r.total_volume)||0), 1);
+      dot.className = 'status-dot live';
+      document.getElementById('lastUpdate').textContent =
+        new Date().toLocaleTimeString('zh-CN', {hour12:false});
+      render();
+    } catch(e) {
+      dot.className = 'status-dot error';
+      console.error('fetch error:', e);
+    }
+  }
+
+  function run() {
+    updateInputHighlights();
+    const params = getParams();
+    lastParams = params;
+    renderTags(params);
+    fetchData(params);
+  }
+
+  // ── 虚拟滚动 ──────────────────────────────────────────
+  const ROW_H     = 39;   // 适配更大字体与 padding
+  const OVERSCAN  = 8;
+  let sortedData  = [];
+
+  function renderVisible() {
+    const wrap    = document.getElementById('tbodyWrap');
+    const tbody   = document.getElementById('tbody');
+    const vtable  = document.getElementById('vtable');
+    const spacer  = document.getElementById('vspacer');
+    const total   = sortedData.length;
+
+    if (total === 0) {
+      spacer.style.height = '120px';
+      vtable.style.top    = '0px';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="12">无符合条件的股票</td></tr>';
+      return;
+    }
+
+    const scrollTop  = wrap.scrollTop;
+    const viewHeight = wrap.clientHeight;
+
+    const firstVis = Math.floor(scrollTop / ROW_H);
+    const lastVis  = Math.ceil((scrollTop + viewHeight) / ROW_H);
+    const startIdx = Math.max(0, firstVis - OVERSCAN);
+    const endIdx   = Math.min(total - 1, lastVis + OVERSCAN);
+
+    spacer.style.height = (total * ROW_H) + 'px';
+    vtable.style.top    = (startIdx * ROW_H) + 'px';
+
+    tbody.innerHTML = sortedData.slice(startIdx, endIdx + 1).map(r => rowHTML(r)).join('');
+  }
+
+  function rowHTML(r) {
+    const pct      = Number(r.change_pct);
+    const cls      = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+    const sign     = pct > 0 ? '+' : '';
+    const vol      = Number(r.total_volume) || 0;
+    const volRatio = r.vol_ratio !== null ? Number(r.vol_ratio) : null;
+    const volPct   = Math.min(100, maxVol > 0 ? vol / maxVol * 100 : 0);
+    const rCls     = volRatio !== null && volRatio >= 2 ? 'vol-ratio-val high' : 'vol-ratio-val';
+    const spread   = r.spread !== null ? Number(r.spread) : null;
+    return `<tr style="height:${ROW_H}px" data-sym="${r.symbol}">
+      <td><span class="symbol">${r.symbol}</span></td>
+      <td class="${cls}">${fmt(r.last_price,3)}</td>
+      <td class="${cls}">${sign}${pct.toFixed(2)}%</td>
+      <td class="${cls}">${sign}${fmt(r.change_amount,3)}</td>
+      <td><div class="bar-cell">${fmtVol(vol)}<div class="mini-bar"><div class="mini-bar-fill" style="width:${volPct.toFixed(1)}%"></div></div></div></td>
+      <td class="flat">${r.avg_vol_10d > 0 ? fmtVol(r.avg_vol_10d) : '—'}</td>
+      <td><span class="${rCls}">${volRatio !== null ? volRatio.toFixed(2)+'x' : '—'}</span></td>
+      <td class="flat">${r.bid !== null ? fmt(r.bid,3) : '—'}</td>
+      <td class="flat">${r.ask !== null ? fmt(r.ask,3) : '—'}</td>
+      <td class="flat">${spread !== null ? fmt(spread,4) : '—'}</td>
+      <td class="flat">${fmt(r.high_price,3)}</td>
+      <td class="flat">${fmt(r.low_price,3)}</td>
+    </tr>`;
+  }
+
+  // ── render（排序 + 触发虚拟渲染）── ───────────────────
+  function render() {
+    sortedData = [...allData];
+    sortedData.sort((a, b) => {
+      const va = sortKey==='symbol' ? a[sortKey] : (Number(a[sortKey]) ?? -Infinity);
+      const vb = sortKey==='symbol' ? b[sortKey] : (Number(b[sortKey]) ?? -Infinity);
+      return va < vb ? sortDir : va > vb ? -sortDir : 0;
+    });
+    document.getElementById('countBadge').innerHTML = `命中 <b>${sortedData.length}</b> 只`;
+    document.getElementById('tbodyWrap').scrollTop = 0;
+    renderVisible();
+  }
+
+  function fmt(v, dec) { const n=Number(v); return isNaN(n)||n===0 ? '—' : n.toFixed(dec); }
+  function fmtVol(v)   { return v>=1e6 ? (v/1e6).toFixed(1)+'M' : v>=1e3 ? (v/1e3).toFixed(1)+'K' : String(v); }
+
+  function clearAll() {
+    FIELDS.forEach(([id]) => { const el=document.getElementById(id); el.value=''; el.classList.remove('has-value'); });
+    run();
+  }
+
+  function startAutoRefresh() {
+    if (autoTimer) clearInterval(autoTimer);
+    autoTimer = setInterval(() => fetchData(lastParams), REFRESH_MS);
+  }
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) clearInterval(autoTimer);
+    else { fetchData(lastParams); startAutoRefresh(); }
+  });
+  FIELDS.forEach(([id]) => {
+    document.getElementById(id).addEventListener('keydown', e => { if (e.key==='Enter') run(); });
+  });
+
+  run();
+  startAutoRefresh();
+</script>
+</body>
+</html>

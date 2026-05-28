@@ -1,0 +1,662 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>稳定选股器</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #1a1a1a;
+    color: #ddd;
+    padding: 20px;
+    line-height: 1.6;
+  }
+  .container { max-width: 1600px; margin: 0 auto; }
+
+  /* ── 导航 ── */
+  .nav-links { text-align: center; margin-bottom: 20px; }
+  .nav-links a {
+    color: #007acc; text-decoration: none; padding: 6px 14px; margin: 0 6px;
+    border: 1px solid #007acc; border-radius: 4px; transition: all 0.2s;
+    display: inline-block; font-size: 13px;
+  }
+  .nav-links a:hover { background-color: #007acc; color: white; }
+  .nav-links a.active { background-color: #007acc; color: white; }
+
+  /* ── 标题栏 ── */
+  .header-bar {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 16px; border-bottom: 1px solid #333; padding-bottom: 12px;
+  }
+  .title { font-size: 1.4em; color: #ddd; font-weight: normal; }
+  .header-right { display: flex; align-items: center; gap: 16px; }
+  .refresh-info { font-size: 12px; color: #888; white-space: nowrap; }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    background: #555; margin-right: 6px; vertical-align: middle;
+    transition: background 0.3s;
+  }
+  .status-dot.live  { background: #26a69a; box-shadow: 0 0 5px #26a69a; }
+  .status-dot.error { background: #ef5350; }
+
+  /* ── 筛选面板 ── */
+  .filter-panel {
+    background: #2a2a2a; padding: 14px 16px; border-radius: 6px;
+    margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 12px 20px;
+    align-items: flex-end;
+  }
+  .filter-group { display: flex; flex-direction: column; gap: 4px; }
+  .filter-group label { font-size: 12px; color: #888; }
+  .filter-row { display: flex; align-items: center; gap: 5px; }
+  .filter-sep { font-size: 12px; color: #555; }
+
+  input[type=number], input[type=text] {
+    background: #1a1a1a; border: 1px solid #444; color: #ddd;
+    padding: 5px 8px; border-radius: 4px; font-size: 13px;
+    outline: none; transition: border-color 0.15s;
+  }
+  input[type=number] {
+    width: 80px;
+    -moz-appearance: textfield;
+  }
+  input[type=number]::-webkit-inner-spin-button,
+  input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; }
+  input[type=number]:focus, input[type=text]:focus { border-color: #007acc; }
+  input[type=number]::placeholder,
+  input[type=text]::placeholder { color: #555; }
+  input[type=number].has-value { border-color: #007acc55; color: #7ac0f0; }
+
+  .filter-actions { display: flex; align-items: flex-end; gap: 8px; margin-left: auto; }
+  .btn {
+    padding: 6px 16px; border-radius: 4px; border: 1px solid #444;
+    background: #1a1a1a; color: #ccc; font-size: 13px; cursor: pointer;
+    transition: all 0.15s; white-space: nowrap;
+  }
+  .btn:hover { border-color: #888; color: #fff; }
+  .btn.primary { border-color: #007acc; color: #7ac0f0; background: #007acc18; }
+  .btn.primary:hover { background: #007acc30; }
+
+  /* ── 代码查询框 ── */
+  .lookup-panel {
+    background: #222; border: 1px solid #333; border-radius: 6px;
+    margin-bottom: 14px; padding: 12px 16px;
+  }
+  .lookup-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .lookup-row label { font-size: 12px; color: #888; white-space: nowrap; }
+  #symbolInput {
+    width: 130px; font-size: 14px; font-weight: bold;
+    text-transform: uppercase; letter-spacing: 0.05em;
+  }
+  .lookup-result {
+    margin-top: 10px; display: none;
+    background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+    padding: 10px 14px;
+  }
+  .lookup-result.show { display: block; }
+  .lookup-sym {
+    font-size: 16px; font-weight: bold; color: #fff; margin-bottom: 8px;
+  }
+  .lookup-sym span { font-size: 12px; font-weight: normal; margin-left: 10px; }
+  .lookup-sym .pass-all { color: #26a69a; }
+  .lookup-sym .fail-some { color: #ef5350; }
+  .lookup-sym .no-data { color: #888; }
+  .rule-detail-grid {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
+    margin-top: 6px;
+  }
+  .rule-card {
+    background: #252525; border-radius: 4px; padding: 8px 10px;
+    border-left: 3px solid #333;
+  }
+  .rule-card.pass { border-left-color: #26a69a; }
+  .rule-card.fail { border-left-color: #ef5350; }
+  .rule-card.na   { border-left-color: #444; opacity: 0.6; }
+  .rule-card-title { font-size: 11px; color: #666; margin-bottom: 3px; }
+  .rule-card-value { font-size: 13px; font-weight: bold; }
+  .rule-card.pass .rule-card-value { color: #26a69a; }
+  .rule-card.fail .rule-card-value { color: #ef5350; }
+  .rule-card.na   .rule-card-value { color: #555; }
+  .rule-card-threshold { font-size: 10px; color: #555; margin-top: 2px; }
+
+  /* ── 状态栏 ── */
+  .status-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    font-size: 12px; color: #888; margin-bottom: 8px; padding: 0 2px;
+  }
+  .rule-summary { display: flex; gap: 10px; align-items: center; }
+  .rule-tag {
+    padding: 2px 8px; border-radius: 3px; font-size: 11px;
+    border: 1px solid #26a69a44; color: #26a69a; background: #26a69a0a;
+  }
+
+  /* ── 表格 ── */
+  table {
+    width: 100%; border-collapse: collapse;
+    background-color: #252525; border-radius: 8px; overflow: hidden;
+    font-size: 13px;
+  }
+  th, td { padding: 9px 12px; text-align: right; border-bottom: 1px solid #2e2e2e; }
+  th {
+    background-color: #333; color: #bbb; font-weight: 600;
+    font-size: 12px; cursor: pointer; user-select: none; white-space: nowrap;
+  }
+  th:hover { color: #fff; }
+  th.sort-asc::after  { content: ' ↑'; color: #007acc; }
+  th.sort-desc::after { content: ' ↓'; color: #007acc; }
+  th:first-child, td:first-child { text-align: left; padding-left: 14px; }
+  tr:hover { background-color: #2a2a2a; }
+
+  .sym { font-weight: bold; color: #fff; font-size: 14px; cursor: pointer; }
+  .sym:hover { color: #7ac0f0; text-decoration: underline; }
+  .up   { color: #26a69a; }
+  .down { color: #ef5350; }
+  .flat { color: #888; }
+
+  /* rule value cells */
+  td.r-pass { color: #26a69a; }
+  td.r-fail { color: #ef5350; }
+  td.r-na   { color: #555; }
+
+  /* vol bar */
+  .vol-cell { display: flex; align-items: center; justify-content: flex-end; gap: 5px; }
+  .mini-bar { width: 32px; height: 3px; background: #333; border-radius: 2px; overflow: hidden; flex-shrink: 0; }
+  .mini-bar-fill { height: 100%; background: #007acc; border-radius: 2px; }
+
+  .empty-row td { text-align: center; padding: 60px; color: #555; }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px;
+    border: 2px solid #333; border-top-color: #007acc;
+    border-radius: 50%; animation: spin 0.7s linear infinite;
+    vertical-align: middle; margin-right: 8px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @media (max-width: 900px) {
+    .filter-panel { gap: 10px; }
+    .header-bar { flex-direction: column; align-items: flex-start; gap: 8px; }
+    .rule-detail-grid { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- 导航 -->
+  <div class="nav-links">
+    <a href="/alerts">价格提醒</a>
+    <a href="/volume-alerts">放量提醒</a>
+    <a href="/hills">山丘形态</a>
+    <a href="/hill-alerts">山丘放量</a>
+    <a href="/ranking">涨跌排名</a>
+    <a href="/l2-alerts">L2大单</a>
+    <a href="/screener">选股器</a>
+    <a href="/stable-screener" class="active">稳定选股</a>
+  </div>
+
+  <!-- 标题栏 -->
+  <div class="header-bar">
+    <h1 class="title">稳定选股器
+      <span style="font-size:0.6em;color:#555;margin-left:8px;">5条规则全部通过</span>
+    </h1>
+    <div class="header-right">
+      <span id="status-text" style="font-size:12px;color:#888;">
+        <span class="status-dot" id="status-dot"></span>初始化
+      </span>
+      <span class="refresh-info" id="refresh-timer">10s 后刷新</span>
+    </div>
+  </div>
+
+  <!-- 基础筛选面板 -->
+  <div class="filter-panel">
+    <div class="filter-group">
+      <label>价格区间</label>
+      <div class="filter-row">
+        <input type="number" id="priceMin" placeholder="最低" step="1" min="0">
+        <span class="filter-sep">—</span>
+        <input type="number" id="priceMax" placeholder="最高" step="1" min="0">
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label>涨跌幅绝对值 %</label>
+      <div class="filter-row">
+        <input type="number" id="changeMin" placeholder="最低" step="0.1" min="0">
+        <span class="filter-sep">—</span>
+        <input type="number" id="changeMax" placeholder="最高" step="0.1" min="0">
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label>成交量区间</label>
+      <div class="filter-row">
+        <input type="number" id="volMin" placeholder="最低" step="1000" min="0">
+        <span class="filter-sep">—</span>
+        <input type="number" id="volMax" placeholder="最高" step="1000" min="0">
+      </div>
+    </div>
+
+    <div class="filter-group">
+      <label>当日振幅 %</label>
+      <div class="filter-row">
+        <input type="number" id="dayRangeMin" placeholder="最低" step="0.1" min="0">
+        <span class="filter-sep">—</span>
+        <input type="number" id="dayRangeMax" placeholder="最高" step="0.1" min="0">
+      </div>
+    </div>
+
+    <div class="filter-actions">
+      <button class="btn" onclick="clearFilters()">清空</button>
+      <button class="btn primary" onclick="run()">筛选</button>
+    </div>
+  </div>
+
+  <!-- 代码查询面板 -->
+  <div class="lookup-panel">
+    <div class="lookup-row">
+      <label>查询单只股票规则详情</label>
+      <input type="text" id="symbolInput" placeholder="输入代码" maxlength="20"
+             oninput="this.value=this.value.toUpperCase()" onkeydown="if(event.key==='Enter')lookupSymbol()">
+      <button class="btn" onclick="lookupSymbol()">查询</button>
+      <button class="btn" onclick="clearLookup()" style="color:#555;border-color:#333;">清除</button>
+      <span style="font-size:12px;color:#555;margin-left:4px;">也可点击表格中的代码</span>
+    </div>
+    <div class="lookup-result" id="lookupResult"></div>
+  </div>
+
+  <!-- 状态栏 -->
+  <div class="status-bar">
+    <div class="rule-summary">
+      <span class="rule-tag">R1 振幅&lt;1.2%</span>
+      <span class="rule-tag">R2 量≥110</span>
+      <span class="rule-tag">R3 价偏&lt;0.5%</span>
+      <span class="rule-tag">R4 漂移&lt;0.3%</span>
+      <span class="rule-tag">R5 ≥7分钟安静</span>
+    </div>
+    <span id="count-info">—</span>
+  </div>
+
+  <!-- 主表格 -->
+  <table>
+    <thead>
+      <tr>
+        <th onclick="sortBy('symbol')">代码</th>
+        <th onclick="sortBy('last_price')">现价</th>
+        <th onclick="sortBy('change_pct')" class="sort-desc">涨跌%</th>
+        <th onclick="sortBy('change_amount')">涨跌额</th>
+        <th onclick="sortBy('total_volume')">今日量</th>
+        <th onclick="sortBy('vol_ratio')">量比</th>
+        <th onclick="sortBy('r1_val')" title="10分钟振幅%，&lt;1.2%">R1 振幅%</th>
+        <th onclick="sortBy('r2_vol')" title="10分钟总量，≥110">R2 量</th>
+        <th onclick="sortBy('r3_pct')" title="现价偏离均价%，&lt;0.5%">R3 价偏%</th>
+        <th onclick="sortBy('r4_pct')" title="首尾中间价漂移%，&lt;0.3%">R4 漂%</th>
+        <th onclick="sortBy('r5_cnt')" title="安静分钟数，≥7">R5 分钟</th>
+        <th onclick="sortBy('bid')">Bid</th>
+        <th onclick="sortBy('ask')">Ask</th>
+        <th onclick="sortBy('spread')">价差</th>
+      </tr>
+    </thead>
+    <tbody id="tbody">
+      <tr class="empty-row"><td colspan="14"><span class="spinner"></span>加载中...</td></tr>
+    </tbody>
+  </table>
+
+</div>
+
+<script>
+// ── STATE ─────────────────────────────────────────────────────────────────
+let allData    = [];   // 全部从接口返回的数据（未过滤）
+let sortedData = [];   // 过滤+排序后用于渲染的数据
+let sortKey    = 'change_pct';
+let sortDir    = -1;
+let maxVol     = 1;
+let countdown  = 10;
+let lastParams = {};
+let isFetching = false;
+
+const SORT_KEYS = [
+  'symbol','last_price','change_pct','change_amount','total_volume','vol_ratio',
+  'r1_val','r2_vol','r3_pct','r4_pct','r5_cnt','bid','ask','spread'
+];
+
+// ── RULE EVAL（固定5条，全部必须通过）─────────────────────────────────────
+function evalRow(row) {
+  const r1_pass = row.r1_val !== null && row.r1_val !== undefined ? row.r1_val < 1.2  : null;
+  const r2_pass = row.r2_vol !== null && row.r2_vol !== undefined ? row.r2_vol >= 110 : null;
+  const r3_pass = row.r3_pct !== null && row.r3_pct !== undefined ? row.r3_pct < 0.5  : null;
+  const r4_pass = row.r4_pct !== null && row.r4_pct !== undefined ? row.r4_pct < 0.3  : null;
+  const r5_pass = row.r5_cnt !== null && row.r5_cnt !== undefined ? row.r5_cnt >= 7   : null;
+  const passAll = r1_pass === true && r2_pass === true && r3_pass === true
+               && r4_pass === true && r5_pass === true;
+  return { r1_pass, r2_pass, r3_pass, r4_pass, r5_pass, passAll };
+}
+
+// ── INPUTS ────────────────────────────────────────────────────────────────
+const FILTER_IDS = ['priceMin','priceMax','changeMin','changeMax','volMin','volMax',
+                    'dayRangeMin','dayRangeMax'];
+
+function getV(id) {
+  const v = document.getElementById(id)?.value.trim();
+  return (!v || v === '') ? null : Number(v);
+}
+function updateHighlights() {
+  FILTER_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('has-value', el.value.trim() !== '');
+  });
+}
+function clearFilters() {
+  FILTER_IDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.value = ''; el.classList.remove('has-value'); }
+  });
+  applyFilter();
+}
+
+// ── SORT ──────────────────────────────────────────────────────────────────
+function sortBy(key) {
+  if (sortKey === key) sortDir *= -1;
+  else { sortKey = key; sortDir = -1; }
+  document.querySelectorAll('thead th').forEach((th, i) => {
+    th.classList.remove('sort-asc','sort-desc');
+    if (SORT_KEYS[i] === key) th.classList.add(sortDir === -1 ? 'sort-desc' : 'sort-asc');
+  });
+  applyFilter();
+}
+
+// ── FETCH ─────────────────────────────────────────────────────────────────
+async function fetchData(params) {
+  if (isFetching) return;
+  isFetching = true;
+  const dot  = document.getElementById('status-dot');
+  const stxt = document.getElementById('status-text');
+  try {
+    const qs  = Object.entries(params).map(([k,v]) => `${k}=${encodeURIComponent(v)}`).join('&');
+    const res = await fetch(`/api/screener-stable${qs ? '?'+qs : ''}`);
+    if (!res.ok) throw new Error(res.status);
+    allData = await res.json();
+    maxVol  = allData.reduce((m, r) => Math.max(m, Number(r.total_volume)||0), 1);
+    dot.className = 'status-dot live';
+    stxt.innerHTML = `<span class="status-dot live"></span>实时 · ${new Date().toLocaleTimeString('zh-CN',{hour12:false})}`;
+    applyFilter();
+    // 如果查询框有内容，刷新查询结果
+    const sym = document.getElementById('symbolInput').value.trim().toUpperCase();
+    if (sym) renderLookup(sym);
+  } catch(e) {
+    dot.className = 'status-dot error';
+    stxt.innerHTML = `<span class="status-dot error"></span>连接失败`;
+    console.error(e);
+  } finally {
+    isFetching = false;
+  }
+}
+
+function run() {
+  updateHighlights();
+  if (allData.length === 0) {
+    // 尚无数据，先拉取
+    fetchData({});
+  } else {
+    applyFilter();
+  }
+}
+
+// ── APPLY FILTER（只保留5条规则全部通过的）────────────────────────────────
+function applyFilter() {
+  const priceMin  = getV('priceMin');
+  const priceMax  = getV('priceMax');
+  const changeMin = getV('changeMin');
+  const changeMax = getV('changeMax');
+  const volMin    = getV('volMin');
+  const volMax    = getV('volMax');
+  const dRangeMin = getV('dayRangeMin');
+  const dRangeMax = getV('dayRangeMax');
+
+  const withEval = allData.map(row => {
+    const ev    = evalRow(row);
+    const vol   = Number(row.total_volume) || 0;
+    const avg   = Number(row.avg_vol_10d)  || 0;
+    const price = Number(row.last_price)   || 0;
+    const pct   = Number(row.change_pct)   || 0;
+    const dayRange = (price > 0 && row.high_price && row.low_price)
+      ? (Number(row.high_price) - Number(row.low_price)) / price * 100 : null;
+    return { ...row, ...ev, vol_ratio: avg > 0 ? vol / avg : 0, dayRange };
+  }).filter(row => {
+    // 必须5条全部通过
+    if (!row.passAll) return false;
+    // 价格区间
+    const price = Number(row.last_price) || 0;
+    const pct   = Number(row.change_pct) || 0;
+    const vol   = Number(row.total_volume) || 0;
+    if (priceMin  !== null && price < priceMin)  return false;
+    if (priceMax  !== null && price > priceMax)  return false;
+    if (changeMin !== null && Math.abs(pct) < changeMin) return false;
+    if (changeMax !== null && Math.abs(pct) > changeMax) return false;
+    if (volMin    !== null && vol   < volMin)    return false;
+    if (volMax    !== null && vol   > volMax)    return false;
+    // 当日振幅
+    if (dRangeMin !== null && (row.dayRange === null || row.dayRange < dRangeMin)) return false;
+    if (dRangeMax !== null && (row.dayRange === null || row.dayRange > dRangeMax)) return false;
+    return true;
+  });
+
+  sortedData = [...withEval].sort((a, b) => {
+    const va = sortKey === 'symbol' ? a[sortKey] : (Number(a[sortKey]) ?? -Infinity);
+    const vb = sortKey === 'symbol' ? b[sortKey] : (Number(b[sortKey]) ?? -Infinity);
+    return va < vb ? sortDir : va > vb ? -sortDir : 0;
+  });
+
+  const total = allData.filter(r => evalRow(r).passAll).length;
+  document.getElementById('count-info').textContent =
+    `全部通过 ${total} 只 · 当前筛选 ${sortedData.length} 只`;
+
+  renderTable();
+}
+
+// ── RENDER TABLE ──────────────────────────────────────────────────────────
+function renderTable() {
+  const tbody = document.getElementById('tbody');
+  if (sortedData.length === 0) {
+    const msg = allData.length === 0
+      ? '<span class="spinner"></span>加载中...'
+      : '暂无符合条件的股票';
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="14">${msg}</td></tr>`;
+    return;
+  }
+
+  const existingRows = {};
+  for (const tr of tbody.querySelectorAll('tr[data-sym]')) {
+    existingRows[tr.dataset.sym] = tr;
+  }
+
+  let ci = 0;
+  for (const row of sortedData) {
+    const html = buildRowHTML(row);
+    let tr = existingRows[row.symbol];
+    if (!tr) {
+      tr = document.createElement('tr');
+      tr.dataset.sym = row.symbol;
+    }
+    if (tr._lastHtml !== html) { tr.innerHTML = html; tr._lastHtml = html; }
+    if (tbody.children[ci] !== tr) tbody.insertBefore(tr, tbody.children[ci] || null);
+    ci++;
+  }
+  while (tbody.children.length > sortedData.length) tbody.removeChild(tbody.lastChild);
+}
+
+function buildRowHTML(r) {
+  const pct  = Number(r.change_pct);
+  const pcls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+  const sign = pct > 0 ? '+' : '';
+  const vol  = Number(r.total_volume) || 0;
+  const vPct = Math.min(100, maxVol > 0 ? vol / maxVol * 100 : 0);
+  const vr   = r.vol_ratio || 0;
+  const bid    = r.bid    != null ? Number(r.bid)    : null;
+  const ask    = r.ask    != null ? Number(r.ask)    : null;
+  const spread = r.spread != null ? Number(r.spread) : null;
+
+  // 规则列：全部通过才显示，所以值只会是绿色
+  const rVal = (v, format) => v != null ? format(v) : '—';
+
+  return `
+    <td><span class="sym" onclick="lookupAndShow('${r.symbol}')">${r.symbol}</span></td>
+    <td class="${pcls}">${fmt(r.last_price,2)}</td>
+    <td class="${pcls}">${sign}${pct.toFixed(2)}%</td>
+    <td class="${pcls}">${sign}${fmt(r.change_amount,3)}</td>
+    <td><div class="vol-cell">${fmtVol(vol)}<div class="mini-bar"><div class="mini-bar-fill" style="width:${vPct.toFixed(1)}%"></div></div></div></td>
+    <td class="${vr >= 2 ? 'up' : 'flat'}">${vr > 0 ? vr.toFixed(2)+'x' : '—'}</td>
+    <td class="r-pass">${rVal(r.r1_val, v => v.toFixed(2)+'%')}</td>
+    <td class="r-pass">${rVal(r.r2_vol, v => fmtVol(v))}</td>
+    <td class="r-pass">${rVal(r.r3_pct, v => v.toFixed(2)+'%')}</td>
+    <td class="r-pass">${rVal(r.r4_pct, v => v.toFixed(2)+'%')}</td>
+    <td class="r-pass">${rVal(r.r5_cnt, v => v+'分')}</td>
+    <td class="flat">${bid    != null ? fmt(bid,2)    : '—'}</td>
+    <td class="flat">${ask    != null ? fmt(ask,2)    : '—'}</td>
+    <td class="flat">${spread != null ? fmt(spread,4) : '—'}</td>`;
+}
+
+// ── 代码查询 ──────────────────────────────────────────────────────────────
+function lookupAndShow(sym) {
+  document.getElementById('symbolInput').value = sym;
+  renderLookup(sym);
+  document.getElementById('lookupResult').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function lookupSymbol() {
+  const sym = document.getElementById('symbolInput').value.trim().toUpperCase();
+  if (!sym) return;
+  renderLookup(sym);
+}
+
+function clearLookup() {
+  document.getElementById('symbolInput').value = '';
+  document.getElementById('lookupResult').className = 'lookup-result';
+  document.getElementById('lookupResult').innerHTML = '';
+}
+
+function renderLookup(sym) {
+  const el = document.getElementById('lookupResult');
+  const row = allData.find(r => r.symbol.toUpperCase() === sym);
+  if (!row) {
+    el.className = 'lookup-result show';
+    el.innerHTML = `<div style="color:#888;font-size:13px;">
+      未找到 <b style="color:#fff">${sym}</b> —— 可能不在今日数据中，或10分钟内暂无交易记录
+    </div>`;
+    return;
+  }
+
+  const ev = evalRow(row);
+  const price = Number(row.last_price);
+  const pct   = Number(row.change_pct);
+  const pcls  = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
+  const sign  = pct > 0 ? '+' : '';
+
+  const statusLabel = ev.passAll
+    ? `<span class="pass-all">✓ 全部通过</span>`
+    : `<span class="fail-some">✗ 未全部通过</span>`;
+
+  const noData = row.bars_count === 0;
+
+  const cards = [
+    {
+      title: 'R1 振幅',
+      pass: ev.r1_pass,
+      value: row.r1_val != null ? row.r1_val.toFixed(2)+'%' : '—',
+      threshold: '< 1.2%',
+      desc: '10分钟 High-Low / 现价',
+    },
+    {
+      title: 'R2 成交量',
+      pass: ev.r2_pass,
+      value: row.r2_vol != null ? fmtVol(row.r2_vol) : '—',
+      threshold: '≥ 110 股',
+      desc: '10分钟总成交量',
+    },
+    {
+      title: 'R3 价格偏离',
+      pass: ev.r3_pass,
+      value: row.r3_pct != null ? row.r3_pct.toFixed(2)+'%' : '—',
+      threshold: '< 0.5%',
+      desc: '现价 vs 10分钟收盘均价',
+    },
+    {
+      title: 'R4 中间价漂移',
+      pass: ev.r4_pass,
+      value: row.r4_pct != null ? row.r4_pct.toFixed(2)+'%' : '—',
+      threshold: '< 0.3%',
+      desc: '首根 vs 末根中间价',
+    },
+    {
+      title: 'R5 安静分钟',
+      pass: ev.r5_pass,
+      value: row.r5_cnt != null ? row.r5_cnt+'分钟' : '—',
+      threshold: '≥ 7 分钟',
+      desc: '蜡烛内振幅 < 0.5%(低价)/0.3%(≥200)',
+    },
+  ];
+
+  const cardsHTML = cards.map(c => {
+    const cls = c.pass === null ? 'na' : c.pass ? 'pass' : 'fail';
+    const icon = c.pass === null ? '' : c.pass ? '✓ ' : '✗ ';
+    return `<div class="rule-card ${cls}">
+      <div class="rule-card-title">${c.title}</div>
+      <div class="rule-card-value">${icon}${c.value}</div>
+      <div class="rule-card-threshold">阈值 ${c.threshold}</div>
+      <div class="rule-card-threshold" style="margin-top:2px;color:#444;">${c.desc}</div>
+    </div>`;
+  }).join('');
+
+  const barsInfo = noData
+    ? `<span style="color:#ef5350;font-size:11px;margin-left:12px;">⚠ 暂无10分钟数据</span>`
+    : `<span style="color:#555;font-size:11px;margin-left:12px;">${row.bars_count} 根1分钟K线</span>`;
+
+  el.className = 'lookup-result show';
+  el.innerHTML = `
+    <div class="lookup-sym">
+      ${sym}
+      <span class="${pcls}">${fmt(price,2)}  ${sign}${pct.toFixed(2)}%</span>
+      ${statusLabel}
+      ${barsInfo}
+    </div>
+    <div class="rule-detail-grid">${cardsHTML}</div>`;
+}
+
+// ── UTILS ─────────────────────────────────────────────────────────────────
+function fmt(v, dec) {
+  const n = Number(v);
+  return isNaN(n) ? '—' : n.toFixed(dec);
+}
+function fmtVol(v) {
+  return v >= 1e6 ? (v/1e6).toFixed(1)+'M' : v >= 1e3 ? (v/1e3).toFixed(1)+'K' : String(Math.round(v));
+}
+
+// ── COUNTDOWN & AUTO REFRESH ──────────────────────────────────────────────
+setInterval(() => {
+  if (countdown <= 0) {
+    fetchData(lastParams);
+    countdown = 10;
+  } else {
+    countdown--;
+  }
+  document.getElementById('refresh-timer').textContent = `${countdown}s 后刷新`;
+}, 1000);
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) { fetchData(lastParams); countdown = 10; }
+});
+
+// 所有筛选框：input 即时过滤（纯前端，无需重新请求）
+['priceMin','priceMax','changeMin','changeMax','volMin','volMax',
+ 'dayRangeMin','dayRangeMax'].forEach(id => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input',   () => run());
+  el.addEventListener('change',  () => run());
+  el.addEventListener('keydown', e => { if (e.key === 'Enter') run(); });
+});
+
+run();
+</script>
+</body>
+</html>
